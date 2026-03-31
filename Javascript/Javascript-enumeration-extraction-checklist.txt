@@ -1,0 +1,21 @@
+1. Browser-Based Extraction (Most Reliable)
+	- Use the actual browser as your HTTP client. The browser has a legitimate TLS fingerprint, correct header order, valid cookies, and passes all behavioral checks because it IS a real browser.
+Tools that drive real browsers:
+
+	- Playwright — headless Chrome/Firefox with full JS execution
+	- Puppeteer — headless Chrome
+	- Selenium — any browser
+2. HAR File Export
+	- Browse the entire app in Chrome normally, then:
+		- DevTools → Network → Export HAR
+	- The HAR file contains every request including all JS file URLs. Parse it offline to extract chunk URLs without making any automated requests to the target.
+3. Burp as Passive Collector
+	-  browse the app manually with Burp intercepting. Every JS file the browser loads gets captured passively. No automated requests, no WAF triggers. The limitation is coverage depends on how thoroughly you browse.
+
+4. Wayback Machine / CommonCrawl
+	- Historical JS files from:
+
+5. Passive JS Discovery via Google Dork
+	- site:target.com ext:js
+	- site:target.com "_next/static"
+	- site:target.com filetype:js
