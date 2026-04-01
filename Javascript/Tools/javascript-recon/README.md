@@ -5,12 +5,22 @@ WAF-aware JavaScript discovery and analysis pipeline for bug bounty reconnaissan
 ## Setup debian Linux
 
 ```bash
-# Create a virtual env with a Python 3.13.9 Not tested on any older versions
+# Create a virtual env with a Python 3.13.9(or use an existing one if you have one setup), I have Not tested on any older versions
 # Install dependencies
 pip3 install -r requirements.txt
 
 # Install Playwright browsers
 playwright install chromium
+# Download and extract curl-impersonate 
+wget https://github.com/lwthiker/curl-impersonate/releases/download/v0.6.1/curl-impersonate-v0.6.1.x86_64-linux-gnu.tar.gz
+tar -xzf curl-impersonate-v0.6.1.x86_64-linux-gnu.tar.gz
+# move the extracted files to the  /usr/local/bin
+sudo mv curl_chrome116 curl_chrome99 curl_chrome100 curl_chrome101 curl_chrome104 curl_chrome107 curl_chrome110 curl-impersonate-chrome curl-impersonate-ff /usr/local/bin/
+# Download other dependacies
+sudo apt install libnss3 nss-plugin-pem ca-certificates
+# Check if install successfull
+/usr/local/bin/curl_chrome116 --version
+ 
 ```
 
 ## Usage
@@ -33,7 +43,7 @@ python3 run.py --target https://example.com --rate-limit 3 --output /tmp/myrecon
 
 # Visible browser window (not headless)
 python3 run.py --target https://example.com --no-headless
-# Skip google and common crawl and save to file, take har file for a path and process
+# Skip google and common crawl and save to file, while taking har file from a path 
 python3 run.py --target https://example.com/path --har /media/Social/example.com --skip-google --skip-wayback --output ~/Targets/example-test
 ```
 
@@ -56,13 +66,13 @@ python3 run.py --target https://example.com/path --har /media/Social/example.com
 
 ## Stages
 
-| Stage | Description                                                    | Output                                |
-| ----- | -------------------------------------------------------------- | ------------------------------------- |
-| 1     | Passive discovery — Google, Wayback, CommonCrawl, HAR          | `stage1_passive.json`                 |
-| 2     | URL categorization and deduplication                           | `stage2_urls.json`                    |
-| 3     | Curl-impersonate Fetching falls back on Playwright JS fetching | `stage3_js/`, `stage3_fetch_log.json` |
-| 4     | JS analysis — endpoints, secrets, GraphQL                      | `stage4_findings.json`                |
-| 5     | Final report generation                                        | `final_report.md`                     |
+| Stage | Description                                                                        | Output                                |
+| ----- | -----------------------------------------------------------------------------------| ------------------------------------- |
+| 1     | Passive discovery — Google, Wayback, CommonCrawl, HAR                              | `stage1_passive.json`                 |
+| 2     | URL categorization and deduplication                                               | `stage2_urls.json`                    |
+| 3     | Curl-impersonate Fetchs then falls back on Playwright JS fetching if error occurs  | `stage3_js/`, `stage3_fetch_log.json` |
+| 4     | JS analysis — endpoints, secrets, GraphQL                                          | `stage4_findings.json`                |
+| 5     | Final report generation                                                            | `final_report.md`                     |
 
 ## How to Export a HAR File
 
