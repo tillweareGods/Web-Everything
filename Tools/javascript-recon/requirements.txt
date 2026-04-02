@@ -1,0 +1,7 @@
+playwright
+google
+requests
+beautifulsoup4
+urllib3
+colorama
+tqdm
