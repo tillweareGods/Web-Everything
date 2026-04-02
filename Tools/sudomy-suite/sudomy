@@ -1,0 +1,699 @@
+#!/usr/bin/env bash
+# ============================================================
+#  sudomy v2.0  —  Fast Subdomain Enumeration & Analysis
+#  Original by @screetsec | Modernized 2024
+#  https://github.com/screetsec/sudomy
+# ============================================================
+# Changes in v2.0:
+#   - Removed dead sources (BufferOver, ThreatCrowd, Riddler, Spyse)
+#   - Added Chaos, LeakIX, Netlas engines
+#   - VirusTotal → v3 API   |  Censys → v2 API
+#   - Fixed unconditional `source slack.conf` crash
+#   - Added permutation enumeration mode (-pE)
+#   - Added async mass DNS resolver (lib/mass_resolver.py)
+#   - Added modernized takeover scanner (lib/takeover_scanner.py)
+#   - Wildcard DNS detection before resolving
+#   - Parallel engine execution with error isolation
+#   - Proper timeout/retry handling on all curl calls
+# ============================================================
+
+APPNAME="sudomy"
+VERSION="2.0.0"
+
+### ── Load configurations ─────────────────────────────────────────────────────
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Source API keys
+if [[ -f "${SCRIPT_DIR}/sudomy.api" ]]; then
+  source "${SCRIPT_DIR}/sudomy.api"
+else
+  echo "[!] sudomy.api not found — API-keyed sources will be skipped" >&2
+fi
+
+# Source config
+if [[ -f "${SCRIPT_DIR}/sudomy.conf" ]]; then
+  source "${SCRIPT_DIR}/sudomy.conf"
+else
+  echo "[!] sudomy.conf not found. Aborting." >&2
+  exit 1
+fi
+
+# Optional Slack webhook (only if configured)
+if [[ -n "${SLACK_WEBHOOK_URL:-}" ]]; then
+  _SLACK_NOTIFY=true
+else
+  _SLACK_NOTIFY=false
+fi
+
+### ── Colors ─────────────────────────────────────────────────────────────────
+
+RESET="\033[0m"
+RED="\033[0;31m"
+GREEN="\033[0;32m"
+BOLD="\033[01;01m"
+WHITE="\033[1;37m"
+YELLOW="\033[1;33m"
+PADDING="  "
+DPADDING="\t\t"
+LGRAY="\033[0;37m"
+LRED="\033[1;31m"
+LGREEN="\033[1;32m"
+LBLUE="\033[1;34m"
+LPURPLE="\033[1;35m"
+LCYAN="\033[1;36m"
+SORANGE="\033[0;33m"
+SBLUE="\033[0;34m"
+SPURPLE="\033[0;35m"
+SCYAN="\033[0;36m"
+DGRAY="\033[1;30m"
+
+### ── Banner ─────────────────────────────────────────────────────────────────
+
+goBanner() {
+  echo -e "${RED} ___         _${YELLOW} _  _ ${GREEN}          ${RESET}"
+  echo -e "${RED}/ __|_  _ __| ${YELLOW}(_)(_)${GREEN}_ __ _  _ ${RESET}"
+  echo -e "${RED}\__ \ || / _  ${YELLOW}/ __ \ ${GREEN} ' \ || |${RESET}"
+  echo -e "${RED}|___/\_,_\__,_${YELLOW}\____/${GREEN}_|_|_\_, |${RESET}"
+  echo -e "${RED}              ${YELLOW}      ${GREEN}      |__/${RESET} v${RED}${VERSION}${RESET} | ${GREEN}@screetsec${RESET}"
+  echo -e "${YELLOW}Sudomy${RESET} — Fast Subdomain Enumeration & Analysis  (Modernized 2024)"
+  echo -e "\t https://github.com/screetsec/sudomy\n"
+}
+
+### ── Help ───────────────────────────────────────────────────────────────────
+
+goHelp() {
+  goBanner
+  echo -e "${BOLD}Usage${RESET}: ${APPNAME} [options] ${BOLD}-d${RESET} <domain>\n"
+  echo -e "${BOLD}Example${RESET}:"
+  echo -e "  ${APPNAME} -d example.com"
+  echo -e "  ${APPNAME} -d example.com -s Shodan,VirusTotal,CrtSH"
+  echo -e "  ${APPNAME} -d example.com --all --httpx --dnsx -rS -tO -sS"
+  echo -e "  ${APPNAME} -d example.com -pE -rS   # permutation + resolve\n"
+
+  echo -e "${BOLD}Passive Enumeration:${RESET}"
+  echo -e "  ${BOLD}-d, --domain${RESET}        Target domain"
+  echo -e "  ${BOLD}-s, --source${RESET}        Comma-separated source list (see sources below)"
+  echo -e "  ${BOLD}-a, --all${RESET}           Run all plugins (no nmap/gobuster)"
+  echo -e "  ${BOLD}-np,--no-passive${RESET}    Skip passive enumeration"
+  echo -e "  ${BOLD}-v, --verbose${RESET}       Verbose output per-source\n"
+
+  echo -e "${BOLD}Active Enumeration:${RESET}"
+  echo -e "  ${BOLD}-b, --bruteforce${RESET}    DNS bruteforce (gobuster)"
+  echo -e "  ${BOLD}-pE,--permute${RESET}       Smart permutation enumeration (no extra tools needed)\n"
+
+  echo -e "${BOLD}Analysis Plugins:${RESET}"
+  echo -e "  ${BOLD}-rS,--resolver${RESET}      Resolve subdomains → IPs (async, wildcard-aware)"
+  echo -e "  ${BOLD}-tO,--takeover${RESET}      Subdomain takeover scanner (${#FINGERPRINTS[@]}+ fingerprints)"
+  echo -e "  ${BOLD}-pS,--ping-sweep${RESET}    Live host detection via ping"
+  echo -e "  ${BOLD}-sC,--status-code${RESET}   HTTP status codes for all subdomains"
+  echo -e "  ${BOLD}-nT,--nmap-top${RESET}      Top-port scan with nmap"
+  echo -e "  ${BOLD}-dP,--db-port${RESET}       Port data from Shodan"
+  echo -e "  ${BOLD}-cF,--cloudflare${RESET}    Detect Cloudflare-protected IPs"
+  echo -e "  ${BOLD}-wS,--websocket${RESET}     WebSocket check"
+  echo -e "  ${BOLD}-eP,--extract-params${RESET} Extract URL parameters (Wayback/CC/URLScan)"
+  echo -e "  ${BOLD}-gW,--gwordlist${RESET}     Generate wordlist from passive URL resources"
+  echo -e "  ${BOLD}-aI,--apps-identifier${RESET} Tech fingerprinting (webanalyze)\n"
+
+  echo -e "${BOLD}Output & Reporting:${RESET}"
+  echo -e "  ${BOLD}-o, --outfile${RESET} DIR   Copy results to DIR when done"
+  echo -e "  ${BOLD}--httpx${RESET}             Probe with httpx (status, title, tech)"
+  echo -e "  ${BOLD}--dnsx${RESET}              DNS queries with dnsx"
+  echo -e "  ${BOLD}--html${RESET}              Generate HTML report"
+  echo -e "  ${BOLD}--graph${RESET}             Network graph visualization"
+  echo -e "  ${BOLD}--no-probe${RESET}          Skip httprobe"
+  echo -e "  ${BOLD}--slack${RESET}             Send results to Slack webhook"
+  echo -e "  ${BOLD}-sS,--screenshot${RESET}    Screenshot live hosts (gowitness)"
+  echo -e "  ${BOLD}-h, --help${RESET}          Show this help\n"
+
+  echo -e "${BOLD}Sources${RESET} (free = no key required):"
+  printf "  ${YELLOW}+${RESET} %-20s %s\n" "CrtSH"          "[free] https://crt.sh"
+  printf "  ${YELLOW}+${RESET} %-20s %s\n" "HackerTarget"   "[free] https://api.hackertarget.com"
+  printf "  ${YELLOW}+${RESET} %-20s %s\n" "AlienVault"     "[free] https://otx.alienvault.com"
+  printf "  ${YELLOW}+${RESET} %-20s %s\n" "RapidDNS"       "[free] https://rapiddns.io"
+  printf "  ${YELLOW}+${RESET} %-20s %s\n" "Webarchive"     "[free] https://web.archive.org"
+  printf "  ${YELLOW}+${RESET} %-20s %s\n" "CommonCrawl"    "[free] https://commoncrawl.org"
+  printf "  ${YELLOW}+${RESET} %-20s %s\n" "URLScan"        "[free+] https://urlscan.io"
+  printf "  ${YELLOW}+${RESET} %-20s %s\n" "Certspotter"    "[free+] https://api.certspotter.com"
+  printf "  ${YELLOW}+${RESET} %-20s %s\n" "ThreatMiner"    "[free] https://api.threatminer.org"
+  printf "  ${YELLOW}+${RESET} %-20s %s\n" "DNSdumpster"    "[free] https://dnsdumpster.com"
+  printf "  ${YELLOW}+${RESET} %-20s %s\n" "LeakIX"         "[free+] https://leakix.net"
+  printf "  ${YELLOW}+${RESET} %-20s %s\n" "Shodan"         "[key]  https://developer.shodan.io"
+  printf "  ${YELLOW}+${RESET} %-20s %s\n" "VirusTotal"     "[key]  https://virustotal.com (v3)"
+  printf "  ${YELLOW}+${RESET} %-20s %s\n" "Censys"         "[key]  https://censys.io (v2)"
+  printf "  ${YELLOW}+${RESET} %-20s %s\n" "BinaryEdge"     "[key]  https://binaryedge.io"
+  printf "  ${YELLOW}+${RESET} %-20s %s\n" "SecurityTrails" "[key]  https://securitytrails.com"
+  printf "  ${YELLOW}+${RESET} %-20s %s\n" "DNSDB"          "[key]  https://api.dnsdb.info"
+  printf "  ${YELLOW}+${RESET} %-20s %s\n" "RiskIQ"         "[key]  https://community.riskiq.com"
+  printf "  ${YELLOW}+${RESET} %-20s %s\n" "Chaos"          "[key]  https://chaos.projectdiscovery.io"
+  printf "  ${YELLOW}+${RESET} %-20s %s\n" "Netlas"         "[key]  https://app.netlas.io"
+  printf "  ${YELLOW}+${RESET} %-20s %s\n" "FBCert"         "[key]  https://graph.facebook.com"
+  printf "  ${DGRAY}~${RESET} %-20s %s\n" "BufferOver"      "[DEAD] replaced by Chaos"
+  printf "  ${DGRAY}~${RESET} %-20s %s\n" "ThreatCrowd"     "[DEAD] replaced by LeakIX"
+  printf "  ${DGRAY}~${RESET} %-20s %s\n" "Riddler"         "[DEAD] replaced by LeakIX"
+  printf "  ${DGRAY}~${RESET} %-20s %s\n" "Spyse"           "[DEAD] use SecurityTrails\n"
+}
+
+### ── Argument Parsing ───────────────────────────────────────────────────────
+
+[[ "${#}" == 0 ]] && { goHelp; exit 1; }
+
+while [[ "${#}" -gt 0 ]]; do
+  arg="${1}"
+  case "$(echo "${arg}" | tr '[:upper:]' '[:lower:]')" in
+  "-d"|"--domain")        DOMAIN="${2}"; shift 2 ;;
+  "--domain="*)           DOMAIN="${1#*=}"; shift ;;
+  "-h"|"--help")          goHelp; exit 0 ;;
+  "-s"|"--source"|"--sources") SOURCE=true; LIST="${2}"; shift 2 ;;
+  "-v"|"--verbose")       verbose=true; shift ;;
+  "-ps"|"--ping-sweep")   PLUGIN_PING_SWEEP=true; shift ;;
+  "-rs"|"--resolver")     PLUGIN_RESOLV_SD=true; shift ;;
+  "-sc"|"--status-code")  PLUGIN_STATUS_CODE=true; shift ;;
+  "-nt"|"--nmap-top")     PLUGIN_NMAP_PORTS=true; shift ;;
+  "-to"|"--takeover")     PLUGIN_TAKEOVER=true; shift ;;
+  "-ws"|"--websocket")    PLUGIN_WEBSOCKET=true; shift ;;
+  "-cf"|"--cloudflare"|"--cloudfare") PLUGIN_CFCHECK=true; shift ;;
+  "-ai"|"--apps-identifier") APPS_IDENTIFIER=true; LIST_API="${2}"; shift 2 ;;
+  "-dp"|"--db-port")      PLUGIN_DB_PORT=true; shift ;;
+  "-ep"|"--extract-params") PLUGIN_EXTRACT_PARAMS=true; shift ;;
+  "-ss"|"--screenshot")   PLUGIN_DOMAIN_SCREENSHOTS=true; PLUGIN_GOWITNESS=true; shift ;;
+  "-b"|"--bruteforce")    PLUGIN_GOBUSTER=true; shift ;;
+  "-pe"|"--permute")      PLUGIN_PERMUTE=true; shift ;;
+  "-np"|"--no-passive")   SOURCE=none; shift ;;
+  "--no-probe")           PLUGIN_HTTPROBE=false; shift ;;
+  "-o"|"--outfile")       DESTINATION=true; OUTFILE="${2}"; shift 2 ;;
+  "--html")               REPORTS=1; shift ;;
+  "--slack")              SLACK=true; shift ;;
+  "--httpx")              PLUGIN_HTTPX=true; shift ;;
+  "--dnsx")               PLUGIN_DNSX=true; shift ;;
+  "--graph")              PLUGIN_NGRAPH=true; shift ;;
+  "-gw"|"--gwordlist")    PLUGIN_WORDLISTS=true; shift ;;
+  "-a"|"--all")
+    PLUGIN_DOMAIN_SCREENSHOTS=true
+    PLUGIN_TAKEOVER=true
+    PLUGIN_STATUS_CODE=true
+    PLUGIN_RESOLV_SD=true
+    PLUGIN_PING_SWEEP=true
+    PLUGIN_DB_PORT=true
+    PLUGIN_EXTRACT_PARAMS=true
+    PLUGIN_HTTPX=true
+    PLUGIN_DNSX=true
+    PLUGIN_CFCHECK=true
+    PLUGIN_NGRAPH=true
+    PLUGIN_WORDLISTS=true
+    PLUGIN_PERMUTE=true
+    shift ;;
+  "-"*)
+    echo -e "${YELLOW}[i]${RESET} Invalid option: ${RED}${1}${RESET}" && exit 1 ;;
+  *)
+    echo -e "${YELLOW}[i]${RESET} Unknown: ${RED}${1}${RESET}" && exit 1 ;;
+  esac
+done
+
+if [[ -z "${DOMAIN}" ]]; then
+  echo "[!] No domain specified. Use -d <domain>. See --help."
+  exit 1
+fi
+
+### ── Dependency Checks ──────────────────────────────────────────────────────
+
+_check_dep() {
+  local cmd="${1}"
+  command -v "${cmd}" &>/dev/null || {
+    echo -e "${RED}[!]${RESET} Required dependency '${cmd}' not found. Run: ./install.sh" >&2
+    exit 1
+  }
+}
+
+_check_dep "curl"
+_check_dep "jq"
+_check_dep "dig"
+_check_dep "python3"
+_check_dep "sort"
+
+# Check optional tools gracefully
+_warn_dep() {
+  local cmd="${1}" msg="${2}"
+  command -v "${cmd}" &>/dev/null || \
+    echo -e "${YELLOW}[~]${RESET} Optional tool '${cmd}' not found — ${msg}"
+}
+
+[[ "${PLUGIN_RESOLV_SD}" == true ]] && {
+  _warn_dep "httprobe" "install via: go install github.com/tomnomnom/httprobe@latest"
+}
+[[ "${PLUGIN_HTTPX}" == true ]] && {
+  _warn_dep "httpx" "install via: go install github.com/projectdiscovery/httpx/cmd/httpx@latest"
+}
+[[ "${PLUGIN_DNSX}" == true ]] && {
+  _warn_dep "dnsx" "install via: go install github.com/projectdiscovery/dnsx/cmd/dnsx@latest"
+}
+[[ "${PLUGIN_GOBUSTER}" == true ]] && {
+  _warn_dep "gobuster" "install via: go install github.com/OJ/gobuster/v3@latest"
+}
+[[ "${PLUGIN_NMAP_PORTS}" == true ]] && {
+  _warn_dep "nmap" "install via: apt install nmap"
+}
+[[ "${PLUGIN_GOWITNESS}" == true ]] && {
+  _warn_dep "gowitness" "install via: go install github.com/sensepost/gowitness@latest"
+}
+
+### ── Setup Output Directories ───────────────────────────────────────────────
+
+DATE_LOG=$(date +%m-%d-%Y)
+DOMAIN_DIR="${OUT}/${DATE_LOG}/${DOMAIN}"
+[[ ! -d "${DOMAIN_DIR}" ]] && mkdir -p "${DOMAIN_DIR}"
+[[ ! -d "${TMP}" ]]        && mkdir -p "${TMP}"
+
+current_date_time=$(date "+%Y-%m-%d %H:%M:%S")
+
+goBanner
+echo -e "${YELLOW}[!]${RESET} For educational & authorized testing only."
+echo -e "${BOLD}[⍥]${RESET} Target: ${LGREEN}${DOMAIN}${RESET} | Started: ${current_date_time}"
+echo -e "────────────────────────────────────────────────────\n"
+
+### ── Source Engine Loading ──────────────────────────────────────────────────
+
+_source_engine() {
+  local path="${1}"
+  if [[ -f "${path}" ]]; then
+    source "${path}"
+  else
+    echo -e "${DGRAY}[–]${RESET} Engine not found: ${path}" >&2
+  fi
+}
+
+_source_engine "${Engine_Shodan}"
+_source_engine "${Engine_VirusTotal}"
+_source_engine "${Engine_Censys}"
+_source_engine "${Engine_Certspotter}"
+_source_engine "${Engine_BinaryEdge}"
+_source_engine "${Engine_Hackertarget}"
+_source_engine "${Engine_Threatminer}"
+_source_engine "${Engine_CrtSH}"
+_source_engine "${Engine_BufferOver}"
+_source_engine "${Engine_Threatcrowd}"
+_source_engine "${Engine_Dnsdumpster}"
+_source_engine "${Engine_Riddler}"
+_source_engine "${Engine_Webarchive}"
+_source_engine "${Engine_SecurityTrails}"
+_source_engine "${Engine_RapidDNS}"
+_source_engine "${Engine_AlienVault}"
+_source_engine "${Engine_CommonCrawl}"
+_source_engine "${Engine_UrlScan}"
+_source_engine "${Engine_DNSDB}"
+_source_engine "${Engine_RiskIQ}"
+_source_engine "${Engine_FBCert}"
+_source_engine "${Engine_Chaos}"
+_source_engine "${Engine_LeakIX}"
+_source_engine "${Engine_Netlas}"
+
+### ── Passive Enumeration ────────────────────────────────────────────────────
+
+# All active source names (functions)
+ALL_SOURCES=(
+  SHODAN WEBARCHIVE DNSDUMPSTER VIRUSTOTAL CERTSPOTTER CERTSH
+  BINARYEDGE SECURITY_TRAILS CENSYS THREATMINER BUFFEROVER
+  HACKERTARGET SPYSE THREATCROWD RIDDLER RAPIDDNS ALIENVAULT
+  COMMONCRAWL URLSCAN DNSDB RISKIQ FBCERT CHAOS LEAKIX NETLAS
+)
+
+echo -e "${BOLD}[+]${RESET} Starting passive enumeration\n"
+echo "────────────────────────────────────────────────────"
+
+run_source_safely() {
+  local fn="${1}"
+  if declare -f "${fn}" > /dev/null 2>&1; then
+    "${fn}" 2>/dev/null || true
+  fi
+}
+
+if [[ "${SOURCE}" == true ]]; then
+  # Run only selected sources
+  for src in $(echo "${LIST}" | tr ',' '\n' | tr '[:upper:]' '[:lower:]'); do
+    fn_upper="${src^^}"
+    run_source_safely "${fn_upper}" &
+  done
+  wait
+
+elif [[ "${SOURCE}" != "none" ]]; then
+  # Run all sources in parallel with a job cap
+  job_count=0
+  for src_fn in "${ALL_SOURCES[@]}"; do
+    run_source_safely "${src_fn}" &
+    (( job_count++ ))
+    if [[ ${job_count} -ge ${MAX_PARALLEL_JOBS} ]]; then
+      wait
+      job_count=0
+    fi
+  done
+  wait
+fi
+
+### ── Merge & Deduplicate ────────────────────────────────────────────────────
+
+ARG_PARS_LIST() {
+  echo -e "\n${BOLD}[+]${RESET} Merging & deduplicating results\n"
+  echo "────────────────────────────────────────────────────"
+
+  # Combine all .log files
+  find "${OUT}" -maxdepth 1 -name "*.log" -type f 2>/dev/null | \
+    xargs cat 2>/dev/null | \
+    sed 's/\*\.//g' | \
+    tr '[:upper:]' '[:lower:]' | \
+    grep -E "^[a-zA-Z0-9._-]+\.${DOMAIN//./\\.}$" | \
+    sort -u > "${DOMAIN_DIR}/${RESULT_SUBDOMAIN}"
+
+  # Clean up temp logs
+  find "${OUT}" -maxdepth 1 -name "*.log" -type f -delete 2>/dev/null
+  find "${OUT}" -maxdepth 1 -name "*.tmp" -type f -delete 2>/dev/null
+
+  local count=0
+  if [[ -f "${DOMAIN_DIR}/${RESULT_SUBDOMAIN}" ]]; then
+    count=$(wc -l < "${DOMAIN_DIR}/${RESULT_SUBDOMAIN}")
+  fi
+
+  echo -e "${PADDING}${GREEN}[✓]${RESET} Total unique subdomains: ${LGREEN}${count}${RESET}"
+  echo -e "${PADDING}${YELLOW}⍥${RESET} Saved → ${DOMAIN_DIR}/${RESULT_SUBDOMAIN}\n"
+
+  if [[ "${verbose}" == true ]] && [[ -f "${DOMAIN_DIR}/${RESULT_SUBDOMAIN}" ]]; then
+    while IFS= read -r sub; do
+      echo -e "${PADDING}  - ${sub}"
+    done < "${DOMAIN_DIR}/${RESULT_SUBDOMAIN}"
+  fi
+}
+
+ARG_PARS_LIST
+
+### ── Permutation Enumeration ────────────────────────────────────────────────
+
+if [[ "${PLUGIN_PERMUTE}" == true ]]; then
+  echo -e "${BOLD}[+]${RESET} Running smart permutation engine\n"
+  echo "────────────────────────────────────────────────────"
+
+  PERM_OUT="${DOMAIN_DIR}/${RESULT_PERMUTATIONS}"
+  python3 "${SCRIPT_DIR}/lib/permutation_engine.py" \
+    -i "${DOMAIN_DIR}/${RESULT_SUBDOMAIN}" \
+    -d "${DOMAIN}" \
+    -o "${PERM_OUT}" 2>&1
+
+  if [[ -f "${PERM_OUT}" ]]; then
+    PERM_RESOLVED="${DOMAIN_DIR}/permutation_resolved.txt"
+    echo -e "${PADDING}${YELLOW}⍥${RESET} Resolving permutations via mass_resolver..."
+    python3 "${SCRIPT_DIR}/lib/mass_resolver.py" \
+      -i "${PERM_OUT}" \
+      -d "${DOMAIN}" \
+      -o "${PERM_RESOLVED}" \
+      --live-only -v 2>&1
+
+    if [[ -f "${PERM_RESOLVED}" ]]; then
+      PERM_COUNT=$(wc -l < "${PERM_RESOLVED}")
+      echo -e "${PADDING}${GREEN}[✓]${RESET} Permutation: ${LGREEN}${PERM_COUNT}${RESET} new live subdomains"
+      # Merge into master list
+      cat "${PERM_RESOLVED}" >> "${DOMAIN_DIR}/${RESULT_SUBDOMAIN}"
+      sort -u "${DOMAIN_DIR}/${RESULT_SUBDOMAIN}" -o "${DOMAIN_DIR}/${RESULT_SUBDOMAIN}"
+    fi
+  fi
+fi
+
+### ── DNS Bruteforce (gobuster) ──────────────────────────────────────────────
+
+if [[ "${PLUGIN_GOBUSTER}" == true ]]; then
+  echo -e "${BOLD}[+]${RESET} DNS Bruteforce (gobuster)\n"
+  echo "────────────────────────────────────────────────────"
+
+  if command -v gobuster &>/dev/null && [[ -f "${_GOWORDLIST}" ]]; then
+    gobuster dns \
+      -d "${DOMAIN}" \
+      -w "${_GOWORDLIST}" \
+      -t 50 \
+      -o "${DOMAIN_DIR}/${OUT_GOBUSTER}" \
+      --no-error \
+      2>/dev/null
+
+    if [[ -f "${DOMAIN_DIR}/${OUT_GOBUSTER}" ]]; then
+      grep -oE '[a-zA-Z0-9._-]+\.'"${DOMAIN//./\\.}" "${DOMAIN_DIR}/${OUT_GOBUSTER}" | \
+        sort -u >> "${DOMAIN_DIR}/${RESULT_SUBDOMAIN}"
+      sort -u "${DOMAIN_DIR}/${RESULT_SUBDOMAIN}" -o "${DOMAIN_DIR}/${RESULT_SUBDOMAIN}"
+      BFCOUNT=$(wc -l < "${DOMAIN_DIR}/${OUT_GOBUSTER}")
+      echo -e "${PADDING}${GREEN}[✓]${RESET} Bruteforce found ${LGREEN}${BFCOUNT}${RESET} subdomains"
+    fi
+  else
+    echo -e "${PADDING}${YELLOW}[~]${RESET} gobuster or wordlist not found — skipping"
+  fi
+fi
+
+### ── Mass DNS Resolver ──────────────────────────────────────────────────────
+
+if [[ "${PLUGIN_RESOLV_SD}" == true ]]; then
+  echo -e "\n${BOLD}[+]${RESET} Resolving subdomains → IPs\n"
+  echo "────────────────────────────────────────────────────"
+
+  RESOLVER_OUT="${DOMAIN_DIR}/${RESULT_MASSDNS}"
+  python3 "${SCRIPT_DIR}/lib/mass_resolver.py" \
+    -i "${DOMAIN_DIR}/${RESULT_SUBDOMAIN}" \
+    -d "${DOMAIN}" \
+    -r "${DNS_RESOLVERS_FILE}" \
+    -o "${RESOLVER_OUT}" \
+    -t 200 -v 2>&1
+
+  if [[ -f "${RESOLVER_OUT}" ]]; then
+    # Also create the simple IP list for compat
+    awk '{print $2}' "${RESOLVER_OUT}" | tr ',' '\n' | \
+      grep -E '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$' | \
+      sort -u > "${DOMAIN_DIR}/${RESULT_IP_RESOLVER}"
+    # And the live-only subdomain list
+    awk '{print $1}' "${RESOLVER_OUT}" | sort -u > "${DOMAIN_DIR}/${FINAL_SUBDOMAIN_REV_ALL}"
+    LIVE_COUNT=$(wc -l < "${DOMAIN_DIR}/${FINAL_SUBDOMAIN_REV_ALL}")
+    echo -e "${PADDING}${GREEN}[✓]${RESET} Live subdomains: ${LGREEN}${LIVE_COUNT}${RESET}"
+  fi
+fi
+
+### ── HTTP Probe (httprobe) ──────────────────────────────────────────────────
+
+if [[ "${PLUGIN_HTTPROBE}" == true ]]; then
+  echo -e "\n${BOLD}[+]${RESET} HTTP probe (httprobe)\n"
+  echo "────────────────────────────────────────────────────"
+
+  PROBE_INPUT="${DOMAIN_DIR}/${FINAL_SUBDOMAIN_REV_ALL:-${RESULT_SUBDOMAIN}}"
+  [[ ! -f "${PROBE_INPUT}" ]] && PROBE_INPUT="${DOMAIN_DIR}/${RESULT_SUBDOMAIN}"
+
+  if command -v httprobe &>/dev/null && [[ -f "${PROBE_INPUT}" ]]; then
+    cat "${PROBE_INPUT}" | \
+      httprobe -c 50 -t 10000 \
+      > "${DOMAIN_DIR}/${RESULT_HTTPROBE}" 2>/dev/null
+    HTTP_COUNT=$(wc -l < "${DOMAIN_DIR}/${RESULT_HTTPROBE}" 2>/dev/null || echo 0)
+    echo -e "${PADDING}${GREEN}[✓]${RESET} Live HTTP endpoints: ${LGREEN}${HTTP_COUNT}${RESET}"
+  else
+    echo -e "${PADDING}${YELLOW}[~]${RESET} httprobe not found — skipping"
+  fi
+fi
+
+### ── httpx Probe ────────────────────────────────────────────────────────────
+
+if [[ "${PLUGIN_HTTPX}" == true ]]; then
+  echo -e "\n${BOLD}[+]${RESET} httpx multi-probe\n"
+  echo "────────────────────────────────────────────────────"
+
+  PROBE_INPUT="${DOMAIN_DIR}/${RESULT_SUBDOMAIN}"
+  if command -v httpx &>/dev/null && [[ -f "${PROBE_INPUT}" ]]; then
+    httpx -l "${PROBE_INPUT}" \
+      -title -status-code -tech-detect \
+      -o "${DOMAIN_DIR}/${RESULT_HTTPX}" \
+      -silent -threads 50 2>/dev/null
+    HTTPX_COUNT=$(wc -l < "${DOMAIN_DIR}/${RESULT_HTTPX}" 2>/dev/null || echo 0)
+    echo -e "${PADDING}${GREEN}[✓]${RESET} httpx results: ${LGREEN}${HTTPX_COUNT}${RESET}"
+  else
+    echo -e "${PADDING}${YELLOW}[~]${RESET} httpx not found — skipping"
+  fi
+fi
+
+### ── dnsx ───────────────────────────────────────────────────────────────────
+
+if [[ "${PLUGIN_DNSX}" == true ]]; then
+  echo -e "\n${BOLD}[+]${RESET} dnsx DNS queries\n"
+  echo "────────────────────────────────────────────────────"
+
+  PROBE_INPUT="${DOMAIN_DIR}/${RESULT_SUBDOMAIN}"
+  if command -v dnsx &>/dev/null && [[ -f "${PROBE_INPUT}" ]]; then
+    dnsx -l "${PROBE_INPUT}" \
+      -a -cname -resp \
+      -o "${DOMAIN_DIR}/${RESULT_DNSX}" \
+      -silent -t 50 2>/dev/null
+    DNSX_COUNT=$(wc -l < "${DOMAIN_DIR}/${RESULT_DNSX}" 2>/dev/null || echo 0)
+    echo -e "${PADDING}${GREEN}[✓]${RESET} dnsx resolved: ${LGREEN}${DNSX_COUNT}${RESET}"
+  else
+    echo -e "${PADDING}${YELLOW}[~]${RESET} dnsx not found — skipping"
+  fi
+fi
+
+### ── Subdomain Takeover ─────────────────────────────────────────────────────
+
+if [[ "${PLUGIN_TAKEOVER}" == true ]]; then
+  echo -e "\n${BOLD}[+]${RESET} Takeover scanner\n"
+  echo "────────────────────────────────────────────────────"
+
+  TAKEOVER_DIR="${DOMAIN_DIR}/takeover"
+  mkdir -p "${TAKEOVER_DIR}"
+  PROBE_INPUT="${DOMAIN_DIR}/${FINAL_SUBDOMAIN_REV_ALL:-${RESULT_SUBDOMAIN}}"
+  [[ ! -f "${PROBE_INPUT}" ]] && PROBE_INPUT="${DOMAIN_DIR}/${RESULT_SUBDOMAIN}"
+
+  python3 "${SCRIPT_DIR}/lib/takeover_scanner.py" \
+    -i "${PROBE_INPUT}" \
+    -o "${TAKEOVER_DIR}/${RESULT_TAKEOVER}" \
+    -t 50 2>&1
+fi
+
+### ── Ping Sweep ─────────────────────────────────────────────────────────────
+
+if [[ "${PLUGIN_PING_SWEEP}" == true ]]; then
+  echo -e "\n${BOLD}[+]${RESET} Ping sweep\n"
+  echo "────────────────────────────────────────────────────"
+
+  if [[ -f "${DOMAIN_DIR}/${RESULT_IP_RESOLVER}" ]]; then
+    : > "${DOMAIN_DIR}/${RESULT_PINGSWEEP}"
+    while IFS= read -r ip; do
+      [[ -z "${ip}" ]] && continue
+      if ping -c 1 -W 2 "${ip}" &>/dev/null; then
+        echo "${ip} LIVE" >> "${DOMAIN_DIR}/${RESULT_PINGSWEEP}"
+      else
+        echo "${ip} DOWN" >> "${DOMAIN_DIR}/${RESULT_PINGSWEEP}"
+      fi
+    done < "${DOMAIN_DIR}/${RESULT_IP_RESOLVER}"
+
+    LIVE=$(grep -c " LIVE" "${DOMAIN_DIR}/${RESULT_PINGSWEEP}" 2>/dev/null || echo 0)
+    mv "${DOMAIN_DIR}/${RESULT_PINGSWEEP}" "${DOMAIN_DIR}/${FINAL_PINGSWEEP}"
+    echo -e "${PADDING}${GREEN}[✓]${RESET} Live IPs: ${LGREEN}${LIVE}${RESET}"
+  else
+    echo -e "${PADDING}${YELLOW}[~]${RESET} No IP resolver results — run -rS first"
+  fi
+fi
+
+### ── Status Code Check ──────────────────────────────────────────────────────
+
+if [[ "${PLUGIN_STATUS_CODE}" == true ]]; then
+  echo -e "\n${BOLD}[+]${RESET} HTTP status codes\n"
+  echo "────────────────────────────────────────────────────"
+
+  PROBE_INPUT="${DOMAIN_DIR}/${RESULT_HTTPROBE:-${RESULT_SUBDOMAIN}}"
+  [[ ! -f "${PROBE_INPUT}" ]] && PROBE_INPUT="${DOMAIN_DIR}/${RESULT_SUBDOMAIN}"
+
+  if [[ -f "${PROBE_INPUT}" ]]; then
+    : > "${DOMAIN_DIR}/${RESULT_HTTP_CODE}"
+    while IFS= read -r url; do
+      [[ -z "${url}" ]] && continue
+      # Ensure URL has scheme
+      [[ "${url}" != http* ]] && url="http://${url}"
+      code=$(curl -sk --max-time 10 -o /dev/null -w "%{http_code}" \
+        -A "Mozilla/5.0 (compatible; Sudomy/2.0)" "${url}" 2>/dev/null)
+      echo "${url} ${code}" >> "${DOMAIN_DIR}/${RESULT_HTTP_CODE}"
+    done < "${PROBE_INPUT}"
+
+    count_200=$(grep -c " 200" "${DOMAIN_DIR}/${RESULT_HTTP_CODE}" 2>/dev/null || echo 0)
+    cp "${DOMAIN_DIR}/${RESULT_HTTP_CODE}" "${DOMAIN_DIR}/${FINAL_HTTP_CODE}"
+    echo -e "${PADDING}${GREEN}[✓]${RESET} HTTP 200 responses: ${LGREEN}${count_200}${RESET}"
+  fi
+fi
+
+### ── Nmap Top Ports ─────────────────────────────────────────────────────────
+
+if [[ "${PLUGIN_NMAP_PORTS}" == true ]]; then
+  echo -e "\n${BOLD}[+]${RESET} Nmap top-ports scan\n"
+  echo "────────────────────────────────────────────────────"
+
+  if command -v nmap &>/dev/null && [[ -f "${DOMAIN_DIR}/${RESULT_IP_RESOLVER}" ]]; then
+    nmap --top-ports 1000 \
+      -iL "${DOMAIN_DIR}/${RESULT_IP_RESOLVER}" \
+      -oN "${DOMAIN_DIR}/${RESULT_NMAP_HOSTS}" \
+      -T4 --open -Pn 2>/dev/null
+    echo -e "${PADDING}${GREEN}[✓]${RESET} Nmap scan complete → ${RESULT_NMAP_HOSTS}"
+  else
+    echo -e "${PADDING}${YELLOW}[~]${RESET} nmap not found or no IPs to scan"
+  fi
+fi
+
+### ── Cloudflare Check ───────────────────────────────────────────────────────
+
+if [[ "${PLUGIN_CFCHECK}" == true ]]; then
+  echo -e "\n${BOLD}[+]${RESET} Cloudflare detection\n"
+  echo "────────────────────────────────────────────────────"
+
+  if command -v cf-check &>/dev/null && [[ -f "${DOMAIN_DIR}/${RESULT_IP_RESOLVER}" ]]; then
+    cf-check -l "${DOMAIN_DIR}/${RESULT_IP_RESOLVER}" \
+      > "${DOMAIN_DIR}/${RESULT_CFCHECK}" 2>/dev/null
+    echo -e "${PADDING}${GREEN}[✓]${RESET} Cloudflare check complete"
+  else
+    echo -e "${PADDING}${YELLOW}[~]${RESET} cf-check not found or no IPs — skipping"
+  fi
+fi
+
+### ── Screenshots ────────────────────────────────────────────────────────────
+
+if [[ "${PLUGIN_GOWITNESS}" == true ]]; then
+  echo -e "\n${BOLD}[+]${RESET} Screenshots (gowitness)\n"
+  echo "────────────────────────────────────────────────────"
+
+  SS_DIR="${DOMAIN_DIR}/screenshots"
+  mkdir -p "${SS_DIR}"
+  PROBE_INPUT="${DOMAIN_DIR}/${RESULT_HTTPROBE}"
+  [[ ! -f "${PROBE_INPUT}" ]] && PROBE_INPUT="${DOMAIN_DIR}/${RESULT_SUBDOMAIN}"
+
+  if command -v gowitness &>/dev/null && [[ -f "${PROBE_INPUT}" ]]; then
+    gowitness file -f "${PROBE_INPUT}" \
+      --screenshot-path "${SS_DIR}" \
+      --timeout 15 \
+      --threads 10 2>/dev/null
+    SS_COUNT=$(find "${SS_DIR}" -name "*.png" 2>/dev/null | wc -l)
+    echo -e "${PADDING}${GREEN}[✓]${RESET} Screenshots taken: ${LGREEN}${SS_COUNT}${RESET}"
+  else
+    echo -e "${PADDING}${YELLOW}[~]${RESET} gowitness not found — skipping"
+  fi
+fi
+
+### ── Slack Notification ─────────────────────────────────────────────────────
+
+if [[ "${SLACK}" == true && "${_SLACK_NOTIFY}" == true ]]; then
+  TOTAL=$(wc -l < "${DOMAIN_DIR}/${RESULT_SUBDOMAIN}" 2>/dev/null || echo 0)
+  PAYLOAD="{\"text\":\"[Sudomy] Scan complete for *${DOMAIN}*\\n• Subdomains: ${TOTAL}\"}"
+  curl -s -X POST -H "Content-type: application/json" \
+    --data "${PAYLOAD}" "${SLACK_WEBHOOK_URL}" &>/dev/null
+  echo -e "${PADDING}${GREEN}[✓]${RESET} Slack notification sent"
+fi
+
+### ── Final Summary ──────────────────────────────────────────────────────────
+
+echo -e "\n════════════════════════════════════════════════════"
+echo -e "${BOLD}[+]${RESET} Sudomy v2.0 — Scan Complete"
+echo -e "════════════════════════════════════════════════════\n"
+
+_print_count() {
+  local label="${1}" file="${2}" grep_pattern="${3:-}"
+  local count=0
+  if [[ -f "${file}" ]]; then
+    if [[ -n "${grep_pattern}" ]]; then
+      count=$(grep -c "${grep_pattern}" "${file}" 2>/dev/null || echo 0)
+    else
+      count=$(wc -l < "${file}" 2>/dev/null || echo 0)
+    fi
+  fi
+  printf "  ${YELLOW}⍥${RESET} %-28s ${LGREEN}%s${RESET}\n" "${label}" "${count}"
+}
+
+_print_count "Subdomains discovered"     "${DOMAIN_DIR}/${RESULT_SUBDOMAIN}"
+_print_count "Resolved (live DNS)"       "${DOMAIN_DIR}/${FINAL_SUBDOMAIN_REV_ALL}"
+_print_count "Unique IPs"                "${DOMAIN_DIR}/${RESULT_IP_RESOLVER}"
+_print_count "HTTP probe (live)"         "${DOMAIN_DIR}/${RESULT_HTTPROBE}"
+_print_count "HTTP 200 responses"        "${DOMAIN_DIR}/${FINAL_HTTP_CODE}" " 200"
+_print_count "Takeover (vulnerable)"     "${DOMAIN_DIR}/takeover/${RESULT_TAKEOVER}" "Vulnerable\|HIGH\|MEDIUM"
+_print_count "Live hosts (ping)"         "${DOMAIN_DIR}/${FINAL_PINGSWEEP}" "LIVE"
+
+echo -e "\n  ${YELLOW}⍥${RESET} Output directory: ${LGREEN}${DOMAIN_DIR}${RESET}"
+[[ "${REPORTS}" == 1 ]] && echo -e "  ${YELLOW}⍥${RESET} HTML report:      ${LGREEN}${DOMAIN_DIR}/report${RESET}"
+echo ""
+
+### ── Copy to destination ────────────────────────────────────────────────────
+
+if [[ "${DESTINATION}" == true ]]; then
+  [[ ! -d "${OUTFILE}" ]] && mkdir -p "${OUTFILE}"
+  cp -r "${DOMAIN_DIR}" "${OUTFILE}/"
+  echo -e "  ${GREEN}[✓]${RESET} Copied to: ${OUTFILE}/${DOMAIN}"
+fi

@@ -1,0 +1,87 @@
+#!/usr/bin/env bash
+# Engine: Shodan
+# URL: https://developer.shodan.io
+# Auth: API Key required (SHODAN_API in sudomy.api)
+# Status: ACTIVE
+
+SHODAN() {
+  local source_name="Shodan"
+
+  if [[ -z "${SHODAN_API}" ]]; then
+    echo -e "${PADDING}${YELLOW}[~]${RESET} ${source_name}: No API key set — skipping"
+    return 0
+  fi
+
+  echo -e "${PADDING}${YELLOW}${PADDING}⍥${PADDING}${RESET}[${LCYAN}${source_name}${RESET}] Querying Shodan DNS database..."
+
+  : > "${OUT_SHODAN}"
+
+  # Method 1: DNS domain lookup (most accurate)
+  local dns_raw
+  dns_raw=$(curl -s --max-time "${CURL_TIMEOUT}" --retry "${CURL_RETRY}" \
+    "https://api.shodan.io/dns/domain/${DOMAIN}?key=${SHODAN_API}" 2>/dev/null)
+
+  if [[ -n "${dns_raw}" ]] && ! echo "${dns_raw}" | grep -q '"error"'; then
+    echo "${dns_raw}" | python3 -c "
+import sys, json
+try:
+    data = json.load(sys.stdin)
+    names = set()
+    # Top-level subdomains field
+    for sub in data.get('subdomains', []):
+        names.add((sub + '.${DOMAIN}').lower())
+    # DNS data entries
+    for entry in data.get('data', []):
+        subdomain = entry.get('subdomain', '')
+        if subdomain:
+            names.add((subdomain + '.${DOMAIN}').lower())
+    for n in sorted(names):
+        print(n)
+except Exception:
+    pass
+" 2>/dev/null >> "${OUT_SHODAN}"
+  fi
+
+  # Method 2: Search API for hosts in domain
+  local page=1
+  while [[ ${page} -le 5 ]]; do
+    local search_raw
+    search_raw=$(curl -s --max-time "${CURL_TIMEOUT}" \
+      "https://api.shodan.io/shodan/host/search?key=${SHODAN_API}&query=hostname%3A${DOMAIN}&facets=hostname&page=${page}" \
+      2>/dev/null)
+
+    [[ -z "${search_raw}" ]] || echo "${search_raw}" | grep -q '"error"' && break
+
+    local found
+    found=$(echo "${search_raw}" | python3 -c "
+import sys, json
+try:
+    data = json.load(sys.stdin)
+    names = set()
+    for match in data.get('matches', []):
+        for h in match.get('hostnames', []):
+            names.add(h.lower())
+    for n in sorted(names):
+        print(n)
+    print(len(data.get('matches', [])), file=sys.stderr)
+except Exception:
+    print(0, file=sys.stderr)
+" 2>/tmp/shodan_count.tmp)
+
+    echo "${found}" >> "${OUT_SHODAN}"
+    local cnt
+    cnt=$(cat /tmp/shodan_count.tmp 2>/dev/null || echo 0)
+    rm -f /tmp/shodan_count.tmp
+    [[ "${cnt}" -lt 1 ]] && break
+    (( page++ ))
+    sleep "${API_DELAY}"
+  done
+
+  sort -u "${OUT_SHODAN}" | \
+    grep -E "^[a-zA-Z0-9._-]+\\.${DOMAIN//./\\.}$" > /tmp/shodan_clean.tmp
+  mv /tmp/shodan_clean.tmp "${OUT_SHODAN}"
+
+  local count
+  count=$(wc -l < "${OUT_SHODAN}" 2>/dev/null || echo 0)
+  echo -e "${PADDING}${GREEN}[✓]${RESET} ${source_name}: Found ${LGREEN}${count}${RESET} subdomains"
+}

@@ -1,0 +1,49 @@
+#!/usr/bin/env bash
+# Engine: crt.sh (Certificate Transparency)
+# URL: https://crt.sh
+# Auth: None (free, public)
+# Status: ACTIVE
+
+CERTSH() {
+  local source_name="crt.sh"
+  local url="https://crt.sh/?q=%25.${DOMAIN}&output=json"
+
+  echo -e "${PADDING}${YELLOW}${PADDING}⍥${PADDING}${RESET}[${LCYAN}${source_name}${RESET}] Fetching certificate transparency logs..."
+
+  local raw
+  raw=$(curl -s --max-time "${CURL_TIMEOUT}" --retry "${CURL_RETRY}" \
+    -H "Accept: application/json" \
+    "${url}" 2>/dev/null)
+
+  if [[ -z "${raw}" ]]; then
+    echo -e "${PADDING}${RED}[!]${RESET} ${source_name}: No response or timeout"
+    return 1
+  fi
+
+  # Extract name_value field, handle wildcard certs (*.example.com)
+  echo "${raw}" | \
+    python3 -c "
+import sys, json
+try:
+    data = json.load(sys.stdin)
+    names = set()
+    for entry in data:
+        for field in ['name_value', 'common_name']:
+            val = entry.get(field, '')
+            for name in val.split('\n'):
+                name = name.strip().lstrip('*.').lower()
+                if name:
+                    names.add(name)
+    for n in sorted(names):
+        print(n)
+except Exception as e:
+    pass
+" 2>/dev/null | \
+    grep -E "^[a-zA-Z0-9._-]+\\.${DOMAIN//./\\.}$" | \
+    grep -v '^\.' | \
+    sort -u > "${OUT_CRTSH}"
+
+  local count
+  count=$(wc -l < "${OUT_CRTSH}" 2>/dev/null || echo 0)
+  echo -e "${PADDING}${GREEN}[✓]${RESET} ${source_name}: Found ${LGREEN}${count}${RESET} subdomains"
+}

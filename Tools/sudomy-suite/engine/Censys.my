@@ -1,0 +1,90 @@
+#!/usr/bin/env bash
+# Engine: Censys
+# URL: https://search.censys.io/register
+# Auth: API ID + API Secret (v2)
+# Status: ACTIVE
+
+CENSYS() {
+  local source_name="Censys"
+
+  if [[ -z "${CENSYS_API_ID}" || -z "${CENSYS_API_SECRET}" ]]; then
+    echo -e "${PADDING}${YELLOW}[~]${RESET} ${source_name}: No API credentials set — skipping"
+    return 0
+  fi
+
+  echo -e "${PADDING}${YELLOW}${PADDING}⍥${PADDING}${RESET}[${LCYAN}${source_name}${RESET}] Querying Censys v2 search API..."
+
+  local page=1
+  local max_pages=5
+  : > "${OUT_CENSYS}"
+
+  while [[ ${page} -le ${max_pages} ]]; do
+    local payload
+    payload=$(python3 -c "
+import json
+q = 'parsed.names: ${DOMAIN}'
+print(json.dumps({
+    'q': q,
+    'fields': ['parsed.names', 'parsed.subject.common_name'],
+    'page': ${page},
+    'flatten': True
+}))
+")
+
+    local raw
+    raw=$(curl -s --max-time "${CURL_TIMEOUT}" \
+      -u "${CENSYS_API_ID}:${CENSYS_API_SECRET}" \
+      -H "Content-Type: application/json" \
+      -d "${payload}" \
+      "https://search.censys.io/api/v2/certificates/search" 2>/dev/null)
+
+    if [[ -z "${raw}" ]] || echo "${raw}" | grep -q '"error"'; then
+      break
+    fi
+
+    local extracted
+    extracted=$(echo "${raw}" | python3 -c "
+import sys, json
+try:
+    data = json.load(sys.stdin)
+    results = data.get('result', {}).get('hits', [])
+    if not results:
+        results = data.get('results', [])
+    names = set()
+    for r in results:
+        # parsed.names array
+        for n in r.get('parsed.names', []):
+            names.add(n.strip().lstrip('*.').lower())
+        # parsed.subject.common_name
+        cn = r.get('parsed.subject.common_name', '')
+        if cn:
+            names.add(cn.strip().lstrip('*.').lower())
+    for n in sorted(names):
+        print(n)
+    # Check if more pages
+    total = data.get('result', {}).get('total', 0)
+    import sys
+    print('__TOTAL__:' + str(total), file=sys.stderr)
+except Exception as e:
+    pass
+" 2>/tmp/censys_meta.tmp)
+
+    echo "${extracted}" >> "${OUT_CENSYS}"
+
+    local total
+    total=$(grep '__TOTAL__:' /tmp/censys_meta.tmp 2>/dev/null | cut -d: -f2-)
+    rm -f /tmp/censys_meta.tmp
+
+    [[ -z "${extracted}" ]] && break
+    (( page++ ))
+    sleep "${API_DELAY}"
+  done
+
+  sort -u "${OUT_CENSYS}" | \
+    grep -E "^[a-zA-Z0-9._-]+\\.${DOMAIN//./\\.}$" > /tmp/censys_clean.tmp
+  mv /tmp/censys_clean.tmp "${OUT_CENSYS}"
+
+  local count
+  count=$(wc -l < "${OUT_CENSYS}" 2>/dev/null || echo 0)
+  echo -e "${PADDING}${GREEN}[✓]${RESET} ${source_name}: Found ${LGREEN}${count}${RESET} subdomains"
+}

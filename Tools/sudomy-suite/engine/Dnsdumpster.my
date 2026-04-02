@@ -1,0 +1,61 @@
+#!/usr/bin/env bash
+# Engine: DNSdumpster
+# URL: https://dnsdumpster.com
+# Auth: None (CSRF scraping)
+# Status: ACTIVE (scrape-based — may break on site changes)
+
+DNSDUMPSTER() {
+  local source_name="DNSdumpster"
+  local base="https://dnsdumpster.com"
+
+  echo -e "${PADDING}${YELLOW}${PADDING}⍥${PADDING}${RESET}[${LCYAN}${source_name}${RESET}] Scraping DNSdumpster (CSRF)..."
+
+  # Step 1: grab CSRF token
+  local csrf
+  csrf=$(curl -s --max-time 20 -c /tmp/dumpster_cookies.txt "${base}" 2>/dev/null | \
+    grep -oP "(?<=csrfmiddlewaretoken')[^']+" | head -1 || \
+    grep -oP 'csrfmiddlewaretoken" value="[^"]+' /tmp/dumpster_cookies.txt 2>/dev/null | \
+    grep -oP '(?<=value=")[^"]+' | head -1)
+
+  # Fallback: extract from page HTML
+  if [[ -z "${csrf}" ]]; then
+    local page_html
+    page_html=$(curl -s --max-time 20 -c /tmp/dumpster_cookies.txt "${base}" 2>/dev/null)
+    csrf=$(echo "${page_html}" | grep -oP 'csrfmiddlewaretoken" value="\K[^"]+' | head -1)
+  fi
+
+  if [[ -z "${csrf}" ]]; then
+    echo -e "${PADDING}${YELLOW}[~]${RESET} ${source_name}: Could not get CSRF token — skipping"
+    : > "${OUT_DNSDUMPSTER}"
+    rm -f /tmp/dumpster_cookies.txt
+    return 0
+  fi
+
+  # Step 2: POST form
+  local raw
+  raw=$(curl -s --max-time 30 \
+    -b /tmp/dumpster_cookies.txt \
+    -c /tmp/dumpster_cookies.txt \
+    -H "Referer: ${base}/" \
+    -d "csrfmiddlewaretoken=${csrf}&targetip=${DOMAIN}&user=free" \
+    "${base}/" 2>/dev/null)
+
+  rm -f /tmp/dumpster_cookies.txt
+
+  if [[ -z "${raw}" ]]; then
+    echo -e "${PADDING}${RED}[!]${RESET} ${source_name}: No response from POST"
+    : > "${OUT_DNSDUMPSTER}"
+    return 1
+  fi
+
+  # Extract subdomains from HTML table cells
+  echo "${raw}" | \
+    grep -oE '[a-zA-Z0-9._-]+\.'"${DOMAIN//./\\.}" | \
+    tr '[:upper:]' '[:lower:]' | \
+    grep -E "^[a-zA-Z0-9._-]+\\.${DOMAIN//./\\.}$" | \
+    sort -u > "${OUT_DNSDUMPSTER}"
+
+  local count
+  count=$(wc -l < "${OUT_DNSDUMPSTER}" 2>/dev/null || echo 0)
+  echo -e "${PADDING}${GREEN}[✓]${RESET} ${source_name}: Found ${LGREEN}${count}${RESET} subdomains"
+}

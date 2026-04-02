@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+# Engine: HackerTarget
+# URL: https://api.hackertarget.com
+# Auth: None (free tier, rate limited)
+# Status: ACTIVE
+
+HACKERTARGET() {
+  local source_name="HackerTarget"
+  local url="https://api.hackertarget.com/hostsearch/?q=${DOMAIN}"
+
+  echo -e "${PADDING}${YELLOW}${PADDING}⍥${PADDING}${RESET}[${LCYAN}${source_name}${RESET}] Querying host search..."
+
+  local raw
+  raw=$(curl -s --max-time "${CURL_TIMEOUT}" --retry "${CURL_RETRY}" \
+    -A "Mozilla/5.0 (compatible; Sudomy/2.0)" \
+    "${url}" 2>/dev/null)
+
+  if [[ -z "${raw}" ]] || echo "${raw}" | grep -qi "error\|API count exceeded\|invalid input"; then
+    echo -e "${PADDING}${YELLOW}[~]${RESET} ${source_name}: Rate limited or error — skipping"
+    return 0
+  fi
+
+  # Format: subdomain.domain.com,IP
+  echo "${raw}" | cut -d',' -f1 | \
+    tr '[:upper:]' '[:lower:]' | \
+    grep -E "^[a-zA-Z0-9._-]+\\.${DOMAIN//./\\.}$" | \
+    sort -u > "${OUT_HACKERTARGET}"
+
+  local count
+  count=$(wc -l < "${OUT_HACKERTARGET}" 2>/dev/null || echo 0)
+  echo -e "${PADDING}${GREEN}[✓]${RESET} ${source_name}: Found ${LGREEN}${count}${RESET} subdomains"
+}

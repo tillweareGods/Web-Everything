@@ -1,0 +1,42 @@
+#!/usr/bin/env bash
+# Engine: RapidDNS
+# URL: https://rapiddns.io
+# Auth: None (public)
+# Status: ACTIVE
+
+RAPIDDNS() {
+  local source_name="RapidDNS"
+  local url="https://rapiddns.io/subdomain/${DOMAIN}?full=1#result"
+
+  echo -e "${PADDING}${YELLOW}${PADDING}⍥${PADDING}${RESET}[${LCYAN}${source_name}${RESET}] Querying RapidDNS..."
+
+  local raw
+  raw=$(curl -s --max-time "${CURL_TIMEOUT}" --retry "${CURL_RETRY}" \
+    -A "Mozilla/5.0 (X11; Linux x86_64; rv:109.0) Gecko/20100101 Firefox/118.0" \
+    -H "Accept: text/html,application/xhtml+xml" \
+    "${url}" 2>/dev/null)
+
+  if [[ -z "${raw}" ]]; then
+    echo -e "${PADDING}${RED}[!]${RESET} ${source_name}: No response"
+    return 1
+  fi
+
+  # Parse HTML table entries
+  echo "${raw}" | \
+    grep -oP '(?<=<td>)[a-zA-Z0-9._-]+\.'"${DOMAIN//./\\.}"'(?=</td>)' | \
+    tr '[:upper:]' '[:lower:]' | \
+    sort -u > "${OUT_RAPIDDNS}"
+
+  # Fallback: grep broader pattern
+  if [[ ! -s "${OUT_RAPIDDNS}" ]]; then
+    echo "${raw}" | \
+      grep -oE '[a-zA-Z0-9._-]+\.'"${DOMAIN//./\\.}" | \
+      tr '[:upper:]' '[:lower:]' | \
+      grep -E "^[a-zA-Z0-9._-]+\\.${DOMAIN//./\\.}$" | \
+      sort -u > "${OUT_RAPIDDNS}"
+  fi
+
+  local count
+  count=$(wc -l < "${OUT_RAPIDDNS}" 2>/dev/null || echo 0)
+  echo -e "${PADDING}${GREEN}[✓]${RESET} ${source_name}: Found ${LGREEN}${count}${RESET} subdomains"
+}

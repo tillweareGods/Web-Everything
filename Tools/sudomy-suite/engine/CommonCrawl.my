@@ -1,0 +1,72 @@
+#!/usr/bin/env bash
+# Engine: CommonCrawl
+# URL: https://commoncrawl.org
+# Auth: None (public)
+# Status: ACTIVE — uses latest available index automatically
+
+COMMONCRAWL() {
+  local source_name="CommonCrawl"
+  : > "${OUT_COMMONCRAWL}"
+
+  echo -e "${PADDING}${YELLOW}${PADDING}⍥${PADDING}${RESET}[${LCYAN}${source_name}${RESET}] Fetching latest crawl index..."
+
+  # Get the most recent CC index dynamically
+  local index_list
+  index_list=$(curl -s --max-time 20 "https://index.commoncrawl.org/collinfo.json" 2>/dev/null | \
+    python3 -c "
+import sys, json
+try:
+    data = json.load(sys.stdin)
+    # Use the 3 most recent indexes for coverage
+    for item in data[:3]:
+        print(item.get('cdx-api', ''))
+except: pass
+" 2>/dev/null)
+
+  if [[ -z "${index_list}" ]]; then
+    # Fallback to a known recent index
+    index_list="https://index.commoncrawl.org/CC-MAIN-2024-10-index"
+  fi
+
+  while IFS= read -r index_url; do
+    [[ -z "${index_url}" ]] && continue
+
+    local raw
+    raw=$(curl -s --max-time 45 \
+      "${index_url}?url=*.${DOMAIN}&output=json&fl=url&limit=10000" 2>/dev/null)
+
+    [[ -z "${raw}" ]] && continue
+
+    # Save raw for URL extraction
+    echo "${raw}" >> "${OUT_RAW_COMMONCRAWL}"
+
+    echo "${raw}" | python3 -c "
+import sys, json
+from urllib.parse import urlparse
+names = set()
+for line in sys.stdin:
+    line = line.strip()
+    if not line:
+        continue
+    try:
+        obj = json.loads(line)
+        url = obj.get('url', '')
+        host = urlparse(url).hostname
+        if host:
+            names.add(host.lower())
+    except:
+        pass
+for n in sorted(names):
+    print(n)
+" 2>/dev/null >> "${OUT_COMMONCRAWL}"
+
+  done <<< "${index_list}"
+
+  sort -u "${OUT_COMMONCRAWL}" | \
+    grep -E "^[a-zA-Z0-9._-]+\\.${DOMAIN//./\\.}$" > /tmp/cc_clean.tmp
+  mv /tmp/cc_clean.tmp "${OUT_COMMONCRAWL}"
+
+  local count
+  count=$(wc -l < "${OUT_COMMONCRAWL}" 2>/dev/null || echo 0)
+  echo -e "${PADDING}${GREEN}[✓]${RESET} ${source_name}: Found ${LGREEN}${count}${RESET} subdomains"
+}

@@ -1,0 +1,50 @@
+#!/usr/bin/env bash
+# Engine: CertSpotter (SSLMate)
+# URL: https://api.certspotter.com
+# Auth: Optional API key for higher rate limits
+# Status: ACTIVE
+
+CERTSPOTTER() {
+  local source_name="CertSpotter"
+  local url="https://api.certspotter.com/v1/issuances?domain=${DOMAIN}&include_subdomains=true&expand=dns_names&limit=1000"
+
+  echo -e "${PADDING}${YELLOW}${PADDING}⍥${PADDING}${RESET}[${LCYAN}${source_name}${RESET}] Fetching certificate issuances..."
+
+  local headers=()
+  # If you have a CertSpotter API key, set CERTSPOTTER_API in sudomy.api
+  if [[ -n "${CERTSPOTTER_API:-}" ]]; then
+    headers+=('-H' "Authorization: Bearer ${CERTSPOTTER_API}")
+  fi
+
+  local raw
+  raw=$(curl -s --max-time "${CURL_TIMEOUT}" --retry "${CURL_RETRY}" \
+    "${headers[@]}" \
+    "${url}" 2>/dev/null)
+
+  if [[ -z "${raw}" ]]; then
+    echo -e "${PADDING}${RED}[!]${RESET} ${source_name}: No response"
+    return 1
+  fi
+
+  echo "${raw}" | python3 -c "
+import sys, json
+try:
+    data = json.load(sys.stdin)
+    names = set()
+    for cert in data:
+        for name in cert.get('dns_names', []):
+            name = name.strip().lstrip('*.').lower()
+            if name:
+                names.add(name)
+    for n in sorted(names):
+        print(n)
+except Exception as e:
+    pass
+" 2>/dev/null | \
+    grep -E "^[a-zA-Z0-9._-]+\\.${DOMAIN//./\\.}$" | \
+    sort -u > "${OUT_CERTSPOTTER}"
+
+  local count
+  count=$(wc -l < "${OUT_CERTSPOTTER}" 2>/dev/null || echo 0)
+  echo -e "${PADDING}${GREEN}[✓]${RESET} ${source_name}: Found ${LGREEN}${count}${RESET} subdomains"
+}

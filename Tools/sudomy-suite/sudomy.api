@@ -1,0 +1,61 @@
+# ============================================================
+#  sudomy.api — API Key Configuration
+#  Updated: 2024  |  sudomy v2.0
+# ============================================================
+# Fill in any API keys you have. Sources without keys will be
+# skipped gracefully and are clearly marked as [FREE] below.
+# ============================================================
+
+# [API KEY REQUIRED] Shodan
+# URL: https://developer.shodan.io
+SHODAN_API=""
+
+# [API KEY REQUIRED] Censys (v2)
+# URL: https://search.censys.io/register
+CENSYS_API_ID=""
+CENSYS_API_SECRET=""
+
+# [API KEY REQUIRED] VirusTotal (v3)
+# URL: https://www.virustotal.com/gui/my-apikey
+VIRUSTOTAL_API=""
+
+# [API KEY REQUIRED] BinaryEdge
+# URL: https://app.binaryedge.io/login
+BINARYEDGE_API=""
+
+# [API KEY REQUIRED] SecurityTrails
+# URL: https://securitytrails.com/
+SECURITY_TRAILS_API=""
+
+# [API KEY REQUIRED] DNSDB (Farsight)
+# URL: https://api.dnsdb.info
+DNSDB_API=""
+
+# [API KEY REQUIRED] PassiveTotal / RiskIQ
+# Format: "email:apikey"
+# URL: https://community.riskiq.com/
+PASSIVE_API=""
+
+# [API KEY REQUIRED] Facebook Graph (Certificate Transparency)
+# URL: https://developers.facebook.com/
+FACEBOOK_TOKEN=""
+
+# [API KEY REQUIRED] Chaos (ProjectDiscovery)
+# URL: https://chaos.projectdiscovery.io/
+CHAOS_API=""
+
+# [API KEY OPTIONAL] URLScan.io  (free tier works without key)
+# URL: https://urlscan.io/user/signup
+URLSCAN_API=""
+
+# [API KEY OPTIONAL] LeakIX  (free tier works without key)
+# URL: https://leakix.net/
+LEAKIX_API=""
+
+# [API KEY OPTIONAL] Netlas
+# URL: https://app.netlas.io/
+NETLAS_API=""
+
+# [FREE - no key needed]
+# HackerTarget, CrtSH, AlienVault OTX, RapidDNS,
+# CommonCrawl, Webarchive, Certspotter (limited), ThreatMiner

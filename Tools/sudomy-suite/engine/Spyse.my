@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+# Engine: Spyse → DEPRECATED (absorbed into SecurityTrails, API shutdown)
+SPYSE() {
+  echo -e "${PADDING}${DGRAY}[–]${RESET} Spyse: ${DGRAY}API retired — use SecurityTrails instead${RESET}"
+  : > "${OUT_SPYSE}"
+}

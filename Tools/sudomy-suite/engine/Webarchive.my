@@ -1,0 +1,65 @@
+#!/usr/bin/env bash
+# Engine: Wayback Machine / Web Archive
+# URL: https://web.archive.org
+# Auth: None (public CDX API)
+# Status: ACTIVE
+
+WEBARCHIVE() {
+  local source_name="WebArchive"
+  local cdx_url="http://web.archive.org/cdx/search/cdx?url=*.${DOMAIN}/*&output=json&fl=original&collapse=urlkey&limit=50000"
+
+  echo -e "${PADDING}${YELLOW}${PADDING}⍥${PADDING}${RESET}[${LCYAN}${source_name}${RESET}] Querying Wayback Machine CDX..."
+
+  local raw
+  raw=$(curl -s --max-time 60 --retry 2 \
+    "${cdx_url}" 2>/dev/null)
+
+  # Save raw for URL parameter extraction
+  echo "${raw}" > "${OUT_RAW_WEBARCHIVE}"
+
+  if [[ -z "${raw}" ]]; then
+    echo -e "${PADDING}${RED}[!]${RESET} ${source_name}: No response"
+    return 1
+  fi
+
+  echo "${raw}" | python3 -c "
+import sys, json
+from urllib.parse import urlparse
+names = set()
+try:
+    data = json.load(sys.stdin)
+    for row in data:
+        if isinstance(row, list) and row:
+            url = row[0]
+        elif isinstance(row, str):
+            url = row
+        else:
+            continue
+        try:
+            host = urlparse(url).hostname
+            if host:
+                names.add(host.lower())
+        except:
+            pass
+except Exception:
+    # Fallback: plain text parsing
+    sys.stdin.seek(0)
+    for line in sys.stdin:
+        line = line.strip().strip('[]\"')
+        if line:
+            try:
+                host = urlparse(line).hostname
+                if host:
+                    names.add(host.lower())
+            except:
+                pass
+for n in sorted(names):
+    print(n)
+" 2>/dev/null | \
+    grep -E "^[a-zA-Z0-9._-]+\\.${DOMAIN//./\\.}$" | \
+    sort -u > "${OUT_WEBARCHIVE}"
+
+  local count
+  count=$(wc -l < "${OUT_WEBARCHIVE}" 2>/dev/null || echo 0)
+  echo -e "${PADDING}${GREEN}[✓]${RESET} ${source_name}: Found ${LGREEN}${count}${RESET} subdomains"
+}

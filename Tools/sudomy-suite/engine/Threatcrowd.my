@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+# Engine: ThreatCrowd → DEPRECATED (shutdown 2022)
+# Replaced by: LeakIX
+THREATCROWD() {
+  echo -e "${PADDING}${DGRAY}[–]${RESET} ThreatCrowd: ${DGRAY}shut down — use LeakIX instead${RESET}"
+  : > "${OUT_THREATCROWD}"
+}

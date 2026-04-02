@@ -1,0 +1,59 @@
+#!/usr/bin/env bash
+# Engine: URLScan.io
+# URL: https://urlscan.io
+# Auth: Optional (higher rate limits with API key)
+# Status: ACTIVE
+
+URLSCAN() {
+  local source_name="URLScan.io"
+  local size=10000
+  local url="https://urlscan.io/api/v1/search/?q=domain%3A${DOMAIN}&size=${size}"
+
+  echo -e "${PADDING}${YELLOW}${PADDING}⍥${PADDING}${RESET}[${LCYAN}${source_name}${RESET}] Searching scan results..."
+
+  local headers=('-H' 'Content-Type: application/json')
+  if [[ -n "${URLSCAN_API}" ]]; then
+    headers+=('-H' "API-Key: ${URLSCAN_API}")
+  fi
+
+  local raw
+  raw=$(curl -s --max-time "${CURL_TIMEOUT}" --retry "${CURL_RETRY}" \
+    "${headers[@]}" \
+    "${url}" 2>/dev/null)
+
+  if [[ -z "${raw}" ]]; then
+    echo -e "${PADDING}${RED}[!]${RESET} ${source_name}: No response"
+    return 1
+  fi
+
+  echo "${raw}" | python3 -c "
+import sys, json
+try:
+    data = json.load(sys.stdin)
+    names = set()
+    for result in data.get('results', []):
+        # page.domain
+        d = result.get('page', {}).get('domain', '')
+        if d: names.add(d.lower())
+        # task.domain
+        d = result.get('task', {}).get('domain', '')
+        if d: names.add(d.lower())
+        # lists.urls — extract hosts
+        for url in result.get('page', {}).get('url', '').split():
+            try:
+                from urllib.parse import urlparse
+                h = urlparse(url).hostname
+                if h: names.add(h.lower())
+            except: pass
+    for n in sorted(names):
+        print(n)
+except Exception as e:
+    pass
+" 2>/dev/null | \
+    grep -E "^[a-zA-Z0-9._-]+\\.${DOMAIN//./\\.}$" | \
+    sort -u > "${OUT_URLSCAN}"
+
+  local count
+  count=$(wc -l < "${OUT_URLSCAN}" 2>/dev/null || echo 0)
+  echo -e "${PADDING}${GREEN}[✓]${RESET} ${source_name}: Found ${LGREEN}${count}${RESET} subdomains"
+}

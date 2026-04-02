@@ -1,0 +1,55 @@
+#!/usr/bin/env bash
+# Engine: AlienVault OTX
+# URL: https://otx.alienvault.com
+# Auth: None required (public endpoint)
+# Status: ACTIVE
+
+ALIENVAULT() {
+  local source_name="AlienVault OTX"
+  local page=1
+  local max_pages=20
+  : > "${OUT_ALIENVAULT}"
+
+  echo -e "${PADDING}${YELLOW}${PADDING}⍥${PADDING}${RESET}[${LCYAN}${source_name}${RESET}] Fetching passive DNS..."
+
+  while [[ ${page} -le ${max_pages} ]]; do
+    local url="https://otx.alienvault.com/api/v1/indicators/domain/${DOMAIN}/passive_dns?page=${page}&limit=500"
+
+    local raw
+    raw=$(curl -s --max-time "${CURL_TIMEOUT}" --retry "${CURL_RETRY}" \
+      "${url}" 2>/dev/null)
+
+    [[ -z "${raw}" ]] && break
+
+    local count_in_page
+    count_in_page=$(echo "${raw}" | python3 -c "
+import sys, json
+try:
+    data = json.load(sys.stdin)
+    records = data.get('passive_dns', [])
+    for r in records:
+        h = r.get('hostname', '').lower().strip()
+        if h:
+            print(h)
+    print(len(records), file=sys.stderr)
+except Exception:
+    print(0, file=sys.stderr)
+" 2>/tmp/av_count.tmp >> "${OUT_ALIENVAULT}")
+
+    local rcount
+    rcount=$(cat /tmp/av_count.tmp 2>/dev/null || echo 0)
+    rm -f /tmp/av_count.tmp
+
+    [[ "${rcount}" -lt 1 ]] && break
+    (( page++ ))
+  done
+
+  sort -u "${OUT_ALIENVAULT}" | \
+    grep -E "^[a-zA-Z0-9._-]+\\.${DOMAIN//./\\.}$" | \
+    grep -v '^\.' > /tmp/av_clean.tmp
+  mv /tmp/av_clean.tmp "${OUT_ALIENVAULT}"
+
+  local count
+  count=$(wc -l < "${OUT_ALIENVAULT}" 2>/dev/null || echo 0)
+  echo -e "${PADDING}${GREEN}[✓]${RESET} ${source_name}: Found ${LGREEN}${count}${RESET} subdomains"
+}

@@ -1,0 +1,44 @@
+#!/usr/bin/env bash
+# Engine: Chaos (ProjectDiscovery)
+# URL: https://chaos.projectdiscovery.io
+# Auth: API Key required (free registration)
+# Status: ACTIVE — extremely high coverage
+
+CHAOS() {
+  local source_name="Chaos/PD"
+
+  if [[ -z "${CHAOS_API}" ]]; then
+    echo -e "${PADDING}${YELLOW}[~]${RESET} ${source_name}: No API key set — skipping"
+    return 0
+  fi
+
+  echo -e "${PADDING}${YELLOW}${PADDING}⍥${PADDING}${RESET}[${LCYAN}${source_name}${RESET}] Querying Chaos passive DNS dataset..."
+
+  local raw
+  raw=$(curl -s --max-time "${CURL_TIMEOUT}" --retry "${CURL_RETRY}" \
+    -H "Authorization: ${CHAOS_API}" \
+    "https://dns.projectdiscovery.io/dns/${DOMAIN}/subdomains" \
+    2>/dev/null)
+
+  if [[ -z "${raw}" ]] || echo "${raw}" | grep -q '"error"\|"message"'; then
+    echo -e "${PADDING}${YELLOW}[~]${RESET} ${source_name}: No data or auth error"
+    return 0
+  fi
+
+  echo "${raw}" | python3 -c "
+import sys, json
+try:
+    data = json.load(sys.stdin)
+    domain = data.get('domain', '${DOMAIN}')
+    for sub in data.get('subdomains', []):
+        print((sub + '.' + domain).lower())
+except Exception:
+    pass
+" 2>/dev/null | \
+    grep -E "^[a-zA-Z0-9._-]+\\.${DOMAIN//./\\.}$" | \
+    sort -u > "${OUT_CHAOS}"
+
+  local count
+  count=$(wc -l < "${OUT_CHAOS}" 2>/dev/null || echo 0)
+  echo -e "${PADDING}${GREEN}[✓]${RESET} ${source_name}: Found ${LGREEN}${count}${RESET} subdomains"
+}

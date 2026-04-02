@@ -1,0 +1,54 @@
+#!/usr/bin/env bash
+# Engine: DNSDB (Farsight Security)
+# URL: https://api.dnsdb.info
+# Auth: API Key required
+# Status: ACTIVE
+
+DNSDB() {
+  local source_name="DNSDB"
+
+  if [[ -z "${DNSDB_API}" ]]; then
+    echo -e "${PADDING}${YELLOW}[~]${RESET} ${source_name}: No API key set — skipping"
+    return 0
+  fi
+
+  echo -e "${PADDING}${YELLOW}${PADDING}⍥${PADDING}${RESET}[${LCYAN}${source_name}${RESET}] Querying Farsight DNSDB..."
+
+  local raw
+  raw=$(curl -s --max-time "${CURL_TIMEOUT}" --retry "${CURL_RETRY}" \
+    -H "X-API-Key: ${DNSDB_API}" \
+    -H "Accept: application/x-ndjson" \
+    "https://api.dnsdb.info/dnsdb/v2/lookup/rrset/name/*.${DOMAIN}/ANY?limit=10000&humantime=false" \
+    2>/dev/null)
+
+  if [[ -z "${raw}" ]]; then
+    echo -e "${PADDING}${RED}[!]${RESET} ${source_name}: No response"
+    return 1
+  fi
+
+  echo "${raw}" | python3 -c "
+import sys, json
+names = set()
+for line in sys.stdin:
+    line = line.strip()
+    if not line:
+        continue
+    try:
+        obj = json.loads(line)
+        rrname = obj.get('obj', {}).get('rrname', '') or obj.get('rrname', '')
+        if rrname:
+            # DNSDB appends a trailing dot
+            name = rrname.rstrip('.').lower()
+            names.add(name)
+    except:
+        pass
+for n in sorted(names):
+    print(n)
+" 2>/dev/null | \
+    grep -E "^[a-zA-Z0-9._-]+\\.${DOMAIN//./\\.}$" | \
+    sort -u > "${OUT_DNSDB}"
+
+  local count
+  count=$(wc -l < "${OUT_DNSDB}" 2>/dev/null || echo 0)
+  echo -e "${PADDING}${GREEN}[✓]${RESET} ${source_name}: Found ${LGREEN}${count}${RESET} subdomains"
+}

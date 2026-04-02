@@ -1,0 +1,45 @@
+#!/usr/bin/env bash
+# Engine: RiskIQ PassiveTotal
+# URL: https://community.riskiq.com
+# Auth: email:apikey in PASSIVE_API
+# Status: ACTIVE
+
+RISKIQ() {
+  local source_name="RiskIQ/PassiveTotal"
+
+  if [[ -z "${PASSIVE_API}" ]]; then
+    echo -e "${PADDING}${YELLOW}[~]${RESET} ${source_name}: No credentials set — skipping"
+    return 0
+  fi
+
+  echo -e "${PADDING}${YELLOW}${PADDING}⍥${PADDING}${RESET}[${LCYAN}${source_name}${RESET}] Querying PassiveTotal subdomains..."
+
+  local raw
+  raw=$(curl -s --max-time "${CURL_TIMEOUT}" --retry "${CURL_RETRY}" \
+    -u "${PASSIVE_API}" \
+    -H "Content-Type: application/json" \
+    "https://api.passivetotal.org/v2/enrichment/subdomains?query=${DOMAIN}" \
+    2>/dev/null)
+
+  if [[ -z "${raw}" ]] || echo "${raw}" | grep -q '"error"'; then
+    echo -e "${PADDING}${YELLOW}[~]${RESET} ${source_name}: Auth error or no data"
+    return 0
+  fi
+
+  echo "${raw}" | python3 -c "
+import sys, json
+try:
+    data = json.load(sys.stdin)
+    domain = '${DOMAIN}'
+    for sub in data.get('subdomains', []):
+        print((sub + '.' + domain).lower())
+except Exception:
+    pass
+" 2>/dev/null | \
+    grep -E "^[a-zA-Z0-9._-]+\\.${DOMAIN//./\\.}$" | \
+    sort -u > "${OUT_RISKIQ}"
+
+  local count
+  count=$(wc -l < "${OUT_RISKIQ}" 2>/dev/null || echo 0)
+  echo -e "${PADDING}${GREEN}[✓]${RESET} ${source_name}: Found ${LGREEN}${count}${RESET} subdomains"
+}

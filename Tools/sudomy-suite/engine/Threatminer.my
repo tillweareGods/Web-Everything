@@ -1,0 +1,41 @@
+#!/usr/bin/env bash
+# Engine: ThreatMiner
+# URL: https://api.threatminer.org
+# Auth: None (public, rate limited)
+# Status: ACTIVE (but slow — built-in retry)
+
+THREATMINER() {
+  local source_name="ThreatMiner"
+  local url="https://api.threatminer.org/v2/domain.php?q=${DOMAIN}&rt=5"
+
+  echo -e "${PADDING}${YELLOW}${PADDING}⍥${PADDING}${RESET}[${LCYAN}${source_name}${RESET}] Querying ThreatMiner..."
+
+  local raw
+  raw=$(curl -s --max-time "${CURL_TIMEOUT}" --retry "${CURL_RETRY}" \
+    -A "Mozilla/5.0 (compatible; Sudomy/2.0)" \
+    "${url}" 2>/dev/null)
+
+  if [[ -z "${raw}" ]]; then
+    echo -e "${PADDING}${RED}[!]${RESET} ${source_name}: No response"
+    return 1
+  fi
+
+  echo "${raw}" | python3 -c "
+import sys, json
+try:
+    data = json.load(sys.stdin)
+    results = data.get('results', [])
+    for sub in results:
+        sub = sub.strip().lower()
+        if sub:
+            print(sub)
+except Exception:
+    pass
+" 2>/dev/null | \
+    grep -E "^[a-zA-Z0-9._-]+\\.${DOMAIN//./\\.}$" | \
+    sort -u > "${OUT_THREATMINER}"
+
+  local count
+  count=$(wc -l < "${OUT_THREATMINER}" 2>/dev/null || echo 0)
+  echo -e "${PADDING}${GREEN}[✓]${RESET} ${source_name}: Found ${LGREEN}${count}${RESET} subdomains"
+}

@@ -1,0 +1,61 @@
+#!/usr/bin/env bash
+# Engine: Netlas
+# URL: https://app.netlas.io
+# Auth: API Key required
+# Status: ACTIVE
+
+NETLAS() {
+  local source_name="Netlas"
+
+  if [[ -z "${NETLAS_API}" ]]; then
+    echo -e "${PADDING}${YELLOW}[~]${RESET} ${source_name}: No API key set — skipping"
+    return 0
+  fi
+
+  echo -e "${PADDING}${YELLOW}${PADDING}⍥${PADDING}${RESET}[${LCYAN}${source_name}${RESET}] Querying Netlas DNS..."
+
+  local page=0
+  : > "${OUT_NETLAS}"
+
+  while [[ ${page} -lt 5 ]]; do
+    local raw
+    raw=$(curl -s --max-time "${CURL_TIMEOUT}" \
+      -H "X-API-Key: ${NETLAS_API}" \
+      "https://app.netlas.io/api/domains/?q=domain%3A*.${DOMAIN}&source_type=include&start=${page}&fields=domain" \
+      2>/dev/null)
+
+    [[ -z "${raw}" ]] && break
+    echo "${raw}" | grep -q '"detail"' && break
+
+    local found
+    found=$(echo "${raw}" | python3 -c "
+import sys, json
+try:
+    data = json.load(sys.stdin)
+    items = data.get('items', [])
+    for item in items:
+        d = item.get('data', {}).get('domain', '') or item.get('domain', '')
+        if d:
+            print(d.lower())
+    print(len(items), file=sys.stderr)
+except:
+    print(0, file=sys.stderr)
+" 2>/tmp/netlas_cnt.tmp)
+
+    echo "${found}" >> "${OUT_NETLAS}"
+    local cnt
+    cnt=$(cat /tmp/netlas_cnt.tmp 2>/dev/null || echo 0)
+    rm -f /tmp/netlas_cnt.tmp
+    [[ "${cnt}" -lt 1 ]] && break
+    (( page += 20 ))
+    sleep "${API_DELAY}"
+  done
+
+  sort -u "${OUT_NETLAS}" | \
+    grep -E "^[a-zA-Z0-9._-]+\\.${DOMAIN//./\\.}$" > /tmp/netlas_clean.tmp
+  mv /tmp/netlas_clean.tmp "${OUT_NETLAS}"
+
+  local count
+  count=$(wc -l < "${OUT_NETLAS}" 2>/dev/null || echo 0)
+  echo -e "${PADDING}${GREEN}[✓]${RESET} ${source_name}: Found ${LGREEN}${count}${RESET} subdomains"
+}

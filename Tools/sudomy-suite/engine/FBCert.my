@@ -1,0 +1,60 @@
+#!/usr/bin/env bash
+# Engine: Facebook Graph Certificate Transparency
+# URL: https://developers.facebook.com
+# Auth: Facebook App token required
+# Status: ACTIVE
+
+FBCERT() {
+  local source_name="Facebook CertLog"
+
+  if [[ -z "${FACEBOOK_TOKEN}" ]]; then
+    echo -e "${PADDING}${YELLOW}[~]${RESET} ${source_name}: No token set — skipping"
+    return 0
+  fi
+
+  echo -e "${PADDING}${YELLOW}${PADDING}⍥${PADDING}${RESET}[${LCYAN}${source_name}${RESET}] Querying Facebook CT logs..."
+
+  local after=""
+  local page=0
+  : > "${OUT_FBCERT}"
+
+  while [[ ${page} -lt 10 ]]; do
+    local url="https://graph.facebook.com/certificates?fields=domains&query=*.${DOMAIN}&access_token=${FACEBOOK_TOKEN}&limit=500"
+    [[ -n "${after}" ]] && url="${url}&after=${after}"
+
+    local raw
+    raw=$(curl -s --max-time "${CURL_TIMEOUT}" --retry "${CURL_RETRY}" \
+      "${url}" 2>/dev/null)
+
+    [[ -z "${raw}" ]] && break
+    echo "${raw}" | grep -q '"error"' && break
+
+    local next_after
+    next_after=$(echo "${raw}" | python3 -c "
+import sys, json
+try:
+    data = json.load(sys.stdin)
+    for cert in data.get('data', []):
+        for d in cert.get('domains', []):
+            print(d.lstrip('*.').lower())
+    cursor = data.get('paging', {}).get('cursors', {}).get('after', '')
+    print('__AFTER__:' + cursor, file=sys.stderr)
+except:
+    print('__AFTER__:', file=sys.stderr)
+" 2>/tmp/fb_cursor.tmp >> "${OUT_FBCERT}")
+
+    after=$(grep '__AFTER__:' /tmp/fb_cursor.tmp 2>/dev/null | cut -d: -f2-)
+    rm -f /tmp/fb_cursor.tmp
+    [[ -z "${after}" ]] && break
+    (( page++ ))
+    sleep 0.5
+  done
+
+  sort -u "${OUT_FBCERT}" | \
+    grep -E "^[a-zA-Z0-9._-]+\\.${DOMAIN//./\\.}$" > /tmp/fb_clean.tmp
+  mv /tmp/fb_clean.tmp "${OUT_FBCERT}"
+
+  local count
+  count=$(wc -l < "${OUT_FBCERT}" 2>/dev/null || echo 0)
+  echo -e "${PADDING}${GREEN}[✓]${RESET} ${source_name}: Found ${LGREEN}${count}${RESET} subdomains"
+}

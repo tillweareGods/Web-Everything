@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+# Engine: BufferOver → DEPRECATED (offline since 2022)
+# Replaced by: Chaos (ProjectDiscovery)
+# This stub exists to prevent source errors.
+BUFFEROVER() {
+  echo -e "${PADDING}${DGRAY}[–]${RESET} BufferOver: ${DGRAY}offline since 2022 — use Chaos instead${RESET}"
+  : > "${OUT_BUFFEROVER}"
+}

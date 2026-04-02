@@ -1,0 +1,73 @@
+#!/usr/bin/env bash
+# Engine: VirusTotal
+# URL: https://www.virustotal.com/gui/my-apikey
+# Auth: API Key required (VIRUSTOTAL_API in sudomy.api)
+# API Version: v3
+# Status: ACTIVE
+
+VIRUSTOTAL() {
+  local source_name="VirusTotal"
+
+  if [[ -z "${VIRUSTOTAL_API}" ]]; then
+    echo -e "${PADDING}${YELLOW}[~]${RESET} ${source_name}: No API key set — skipping"
+    return 0
+  fi
+
+  echo -e "${PADDING}${YELLOW}${PADDING}⍥${PADDING}${RESET}[${LCYAN}${source_name}${RESET}] Querying subdomains via v3 API..."
+
+  local cursor=""
+  local page=0
+  local max_pages=10
+  : > "${OUT_VIRUSTOTAL}"
+
+  while true; do
+    local url="https://www.virustotal.com/api/v3/domains/${DOMAIN}/subdomains?limit=40"
+    [[ -n "${cursor}" ]] && url="${url}&cursor=${cursor}"
+
+    local raw
+    raw=$(curl -s --max-time "${CURL_TIMEOUT}" --retry "${CURL_RETRY}" \
+      -H "x-apikey: ${VIRUSTOTAL_API}" \
+      "${url}" 2>/dev/null)
+
+    if [[ -z "${raw}" ]]; then
+      break
+    fi
+
+    # Extract subdomains and append
+    echo "${raw}" | \
+      python3 -c "
+import sys, json
+try:
+    data = json.load(sys.stdin)
+    items = data.get('data', [])
+    for item in items:
+        sub = item.get('id', '')
+        if sub:
+            print(sub.lower())
+    # Print cursor for pagination
+    meta = data.get('meta', {})
+    cursor = meta.get('cursor', '')
+    print('__CURSOR__:' + cursor, file=sys.stderr)
+except Exception:
+    pass
+" 2>/tmp/vt_cursor.tmp >> "${OUT_VIRUSTOTAL}"
+
+    # Read next cursor
+    cursor=$(grep '__CURSOR__:' /tmp/vt_cursor.tmp 2>/dev/null | cut -d: -f2-)
+    rm -f /tmp/vt_cursor.tmp
+
+    [[ -z "${cursor}" ]] && break
+    (( page++ ))
+    [[ ${page} -ge ${max_pages} ]] && break
+    sleep 0.5
+  done
+
+  # Clean and filter
+  sort -u "${OUT_VIRUSTOTAL}" | \
+    grep -E "^[a-zA-Z0-9._-]+\\.${DOMAIN//./\\.}$" > /tmp/vt_clean.tmp
+  mv /tmp/vt_clean.tmp "${OUT_VIRUSTOTAL}"
+
+  local count
+  count=$(wc -l < "${OUT_VIRUSTOTAL}" 2>/dev/null || echo 0)
+  echo -e "${PADDING}${GREEN}[✓]${RESET} ${source_name}: Found ${LGREEN}${count}${RESET} subdomains"
+}

@@ -1,0 +1,47 @@
+#!/usr/bin/env bash
+# Engine: SecurityTrails
+# URL: https://securitytrails.com
+# Auth: API Key required
+# Status: ACTIVE
+
+SECURITY_TRAILS() {
+  local source_name="SecurityTrails"
+
+  if [[ -z "${SECURITY_TRAILS_API}" ]]; then
+    echo -e "${PADDING}${YELLOW}[~]${RESET} ${source_name}: No API key set — skipping"
+    return 0
+  fi
+
+  echo -e "${PADDING}${YELLOW}${PADDING}⍥${PADDING}${RESET}[${LCYAN}${source_name}${RESET}] Querying subdomain history..."
+
+  : > "${OUT_STRAILS}"
+
+  # Current subdomains
+  local raw
+  raw=$(curl -s --max-time "${CURL_TIMEOUT}" --retry "${CURL_RETRY}" \
+    -H "APIKEY: ${SECURITY_TRAILS_API}" \
+    -H "Content-Type: application/json" \
+    "https://api.securitytrails.com/v1/domain/${DOMAIN}/subdomains?children_only=false&include_inactive=true" \
+    2>/dev/null)
+
+  if [[ -n "${raw}" ]] && ! echo "${raw}" | grep -q '"message"'; then
+    echo "${raw}" | python3 -c "
+import sys, json
+try:
+    data = json.load(sys.stdin)
+    domain = '${DOMAIN}'
+    for sub in data.get('subdomains', []):
+        print((sub + '.' + domain).lower())
+except Exception:
+    pass
+" 2>/dev/null >> "${OUT_STRAILS}"
+  fi
+
+  sort -u "${OUT_STRAILS}" | \
+    grep -E "^[a-zA-Z0-9._-]+\\.${DOMAIN//./\\.}$" > /tmp/st_clean.tmp
+  mv /tmp/st_clean.tmp "${OUT_STRAILS}"
+
+  local count
+  count=$(wc -l < "${OUT_STRAILS}" 2>/dev/null || echo 0)
+  echo -e "${PADDING}${GREEN}[✓]${RESET} ${source_name}: Found ${LGREEN}${count}${RESET} subdomains"
+}

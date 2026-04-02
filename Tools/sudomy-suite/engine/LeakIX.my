@@ -1,0 +1,50 @@
+#!/usr/bin/env bash
+# Engine: LeakIX
+# URL: https://leakix.net
+# Auth: Optional (higher limits with key)
+# Status: ACTIVE — replaces defunct Riddler + ThreatCrowd
+
+LEAKIX() {
+  local source_name="LeakIX"
+  local url="https://leakix.net/api/subdomains/${DOMAIN}"
+
+  echo -e "${PADDING}${YELLOW}${PADDING}⍥${PADDING}${RESET}[${LCYAN}${source_name}${RESET}] Querying LeakIX subdomains..."
+
+  local headers=('-H' 'Accept: application/json')
+  if [[ -n "${LEAKIX_API}" ]]; then
+    headers+=('-H' "api-key: ${LEAKIX_API}")
+  fi
+
+  local raw
+  raw=$(curl -s --max-time "${CURL_TIMEOUT}" --retry "${CURL_RETRY}" \
+    "${headers[@]}" \
+    "${url}" 2>/dev/null)
+
+  if [[ -z "${raw}" ]] || echo "${raw}" | grep -q '"error"'; then
+    echo -e "${PADDING}${YELLOW}[~]${RESET} ${source_name}: No data returned"
+    : > "${OUT_LEAKIX}"
+    return 0
+  fi
+
+  echo "${raw}" | python3 -c "
+import sys, json
+try:
+    data = json.load(sys.stdin)
+    if isinstance(data, list):
+        for entry in data:
+            sub = entry.get('subdomain', '') or entry.get('host', '')
+            if sub:
+                print(sub.lower())
+    elif isinstance(data, dict):
+        for sub in data.get('subdomains', []):
+            print(sub.lower())
+except Exception:
+    pass
+" 2>/dev/null | \
+    grep -E "^[a-zA-Z0-9._-]+\\.${DOMAIN//./\\.}$" | \
+    sort -u > "${OUT_LEAKIX}"
+
+  local count
+  count=$(wc -l < "${OUT_LEAKIX}" 2>/dev/null || echo 0)
+  echo -e "${PADDING}${GREEN}[✓]${RESET} ${source_name}: Found ${LGREEN}${count}${RESET} subdomains"
+}

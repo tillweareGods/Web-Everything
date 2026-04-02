@@ -1,0 +1,59 @@
+#!/usr/bin/env bash
+# Engine: BinaryEdge
+# URL: https://app.binaryedge.io
+# Auth: API Key required
+# Status: ACTIVE
+
+BINARYEDGE() {
+  local source_name="BinaryEdge"
+
+  if [[ -z "${BINARYEDGE_API}" ]]; then
+    echo -e "${PADDING}${YELLOW}[~]${RESET} ${source_name}: No API key set — skipping"
+    return 0
+  fi
+
+  echo -e "${PADDING}${YELLOW}${PADDING}⍥${PADDING}${RESET}[${LCYAN}${source_name}${RESET}] Querying BinaryEdge domains..."
+
+  local page=1
+  : > "${OUT_BINARYEDGE}"
+
+  while [[ ${page} -le 5 ]]; do
+    local raw
+    raw=$(curl -s --max-time "${CURL_TIMEOUT}" --retry "${CURL_RETRY}" \
+      -H "X-Key: ${BINARYEDGE_API}" \
+      "https://api.binaryedge.io/v2/query/domains/subdomain/${DOMAIN}?page=${page}" \
+      2>/dev/null)
+
+    [[ -z "${raw}" ]] && break
+    echo "${raw}" | grep -q '"error"' && break
+
+    local found
+    found=$(echo "${raw}" | python3 -c "
+import sys, json
+try:
+    data = json.load(sys.stdin)
+    events = data.get('events', [])
+    for e in events:
+        print(e.lower())
+    print(len(events), file=sys.stderr)
+except:
+    print(0, file=sys.stderr)
+" 2>/tmp/be_count.tmp)
+
+    echo "${found}" >> "${OUT_BINARYEDGE}"
+    local cnt
+    cnt=$(cat /tmp/be_count.tmp 2>/dev/null || echo 0)
+    rm -f /tmp/be_count.tmp
+    [[ "${cnt}" -lt 1 ]] && break
+    (( page++ ))
+    sleep "${API_DELAY}"
+  done
+
+  sort -u "${OUT_BINARYEDGE}" | \
+    grep -E "^[a-zA-Z0-9._-]+\\.${DOMAIN//./\\.}$" > /tmp/be_clean.tmp
+  mv /tmp/be_clean.tmp "${OUT_BINARYEDGE}"
+
+  local count
+  count=$(wc -l < "${OUT_BINARYEDGE}" 2>/dev/null || echo 0)
+  echo -e "${PADDING}${GREEN}[✓]${RESET} ${source_name}: Found ${LGREEN}${count}${RESET} subdomains"
+}

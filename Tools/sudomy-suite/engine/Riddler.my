@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+# Engine: Riddler → DEPRECATED (shutdown 2021)
+# Replaced by: LeakIX
+RIDDLER() {
+  echo -e "${PADDING}${DGRAY}[–]${RESET} Riddler: ${DGRAY}shut down — use LeakIX instead${RESET}"
+  : > "${OUT_RIDDLER}"
+}

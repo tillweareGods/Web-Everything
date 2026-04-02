@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+# Engine: Findsubdomains → DEPRECATED (service no longer free/accessible)
+# Replaced by: CrtSH + Chaos
+FINDSUBDOMAINS() {
+  echo -e "${PADDING}${DGRAY}[–]${RESET} Findsubdomains: ${DGRAY}no longer accessible — use CrtSH or Chaos${RESET}"
+  : > "${OUT_FINDSUBDOMAIN:-/dev/null}"
+}
