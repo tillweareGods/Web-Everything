@@ -10,5 +10,5 @@ It briefly explains:
 
 To use the guide:
 
-1. Download the **`jwt_guide.html`** file from this repository (use the _Raw_ version).
+1. Download the **`jwt guide.html`** file from this repository (use the _Raw_ version).
 2. Open the file in any modern web browser.
