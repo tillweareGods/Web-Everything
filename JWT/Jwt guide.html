@@ -1,0 +1,890 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Public & Private Key Cryptography</title>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Syne:wght@400;500;700;800&family=DM+Sans:ital,wght@0,300;0,400;0,500;1,300&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #0a0d12;
+    --bg2: #0f1318;
+    --bg3: #151b23;
+    --bg4: #1c242f;
+    --border: rgba(255,255,255,0.07);
+    --border2: rgba(255,255,255,0.12);
+    --cyan: #00c2e0;
+    --cyan-dim: rgba(0,194,224,0.12);
+    --cyan-mid: rgba(0,194,224,0.25);
+    --amber: #f0a500;
+    --amber-dim: rgba(240,165,0,0.12);
+    --red: #e8445a;
+    --red-dim: rgba(232,68,90,0.12);
+    --green: #34d97b;
+    --green-dim: rgba(52,217,123,0.1);
+    --purple: #9f7dff;
+    --purple-dim: rgba(159,125,255,0.12);
+    --text: #e8edf5;
+    --text2: #8a95a3;
+    --text3: #55616e;
+    --mono: 'IBM Plex Mono', monospace;
+    --sans: 'DM Sans', sans-serif;
+    --display: 'Syne', sans-serif;
+  }
+
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: var(--sans);
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+
+  /* Grid background */
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background-image:
+      linear-gradient(rgba(0,194,224,0.03) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(0,194,224,0.03) 1px, transparent 1px);
+    background-size: 40px 40px;
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  /* Glow blob */
+  body::after {
+    content: '';
+    position: fixed;
+    top: -200px;
+    right: -200px;
+    width: 600px;
+    height: 600px;
+    background: radial-gradient(circle, rgba(0,194,224,0.06) 0%, transparent 70%);
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  .page {
+    position: relative;
+    z-index: 1;
+    max-width: 900px;
+    margin: 0 auto;
+    padding: 3rem 2rem 5rem;
+  }
+
+  /* Header */
+  .header {
+    margin-bottom: 3rem;
+    padding-bottom: 2rem;
+    border-bottom: 1px solid var(--border);
+  }
+  .header-eyebrow {
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 0.15em;
+    color: var(--cyan);
+    text-transform: uppercase;
+    margin-bottom: 0.75rem;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .header-eyebrow::before {
+    content: '';
+    display: inline-block;
+    width: 20px;
+    height: 1px;
+    background: var(--cyan);
+  }
+  h1 {
+    font-family: var(--display);
+    font-size: clamp(2rem, 5vw, 3.2rem);
+    font-weight: 800;
+    line-height: 1.1;
+    letter-spacing: -0.02em;
+    color: #fff;
+    margin-bottom: 0.75rem;
+  }
+  h1 span { color: var(--cyan); }
+  .header-sub {
+    font-size: 15px;
+    color: var(--text2);
+    font-weight: 300;
+    max-width: 500px;
+    line-height: 1.6;
+  }
+
+  /* Nav */
+  .nav {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-bottom: 2.5rem;
+  }
+  .nav-btn {
+    font-family: var(--mono);
+    font-size: 12px;
+    letter-spacing: 0.05em;
+    padding: 7px 16px;
+    border-radius: 4px;
+    border: 1px solid var(--border2);
+    background: transparent;
+    color: var(--text2);
+    cursor: pointer;
+    transition: all 0.2s;
+    position: relative;
+    overflow: hidden;
+  }
+  .nav-btn::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: var(--cyan-dim);
+    opacity: 0;
+    transition: opacity 0.2s;
+  }
+  .nav-btn:hover::before { opacity: 1; }
+  .nav-btn:hover { color: var(--cyan); border-color: var(--cyan); }
+  .nav-btn.active {
+    background: var(--cyan-dim);
+    color: var(--cyan);
+    border-color: var(--cyan);
+  }
+
+  /* Sections */
+  .section { display: none; animation: fadeIn 0.3s ease; }
+  .section.active { display: block; }
+  @keyframes fadeIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
+
+  /* Section header */
+  .section-label {
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--text3);
+    margin-bottom: 0.4rem;
+  }
+  h2 {
+    font-family: var(--display);
+    font-size: 1.6rem;
+    font-weight: 700;
+    color: #fff;
+    margin-bottom: 0.75rem;
+  }
+  .section-intro {
+    font-size: 15px;
+    color: var(--text2);
+    line-height: 1.7;
+    max-width: 620px;
+    margin-bottom: 2rem;
+    font-weight: 300;
+  }
+
+  /* Cards */
+  .card-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; margin-bottom: 2rem; }
+  .card {
+    background: var(--bg3);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 1.25rem;
+    transition: border-color 0.2s, transform 0.2s;
+  }
+  .card:hover { border-color: var(--border2); transform: translateY(-2px); }
+  .card-icon {
+    width: 32px;
+    height: 32px;
+    border-radius: 6px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 14px;
+    margin-bottom: 0.85rem;
+    font-family: var(--mono);
+    font-weight: 500;
+  }
+  .card-icon.cyan { background: var(--cyan-dim); color: var(--cyan); border: 1px solid rgba(0,194,224,0.2); }
+  .card-icon.amber { background: var(--amber-dim); color: var(--amber); border: 1px solid rgba(240,165,0,0.2); }
+  .card-icon.purple { background: var(--purple-dim); color: var(--purple); border: 1px solid rgba(159,125,255,0.2); }
+  .card-icon.red { background: var(--red-dim); color: var(--red); border: 1px solid rgba(232,68,90,0.2); }
+  .card-icon.green { background: var(--green-dim); color: var(--green); border: 1px solid rgba(52,217,123,0.2); }
+  .card h3 {
+    font-family: var(--display);
+    font-size: 14px;
+    font-weight: 700;
+    color: #fff;
+    margin-bottom: 0.5rem;
+  }
+  .card p {
+    font-size: 13.5px;
+    color: var(--text2);
+    line-height: 1.65;
+    font-weight: 300;
+  }
+
+  /* Table */
+  .table-wrap { border: 1px solid var(--border); border-radius: 8px; overflow: hidden; margin-bottom: 2rem; }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  thead { background: var(--bg4); }
+  th {
+    text-align: left;
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--text3);
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--border);
+  }
+  td {
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--border);
+    color: var(--text2);
+    vertical-align: top;
+    font-weight: 300;
+  }
+  tr:last-child td { border-bottom: none; }
+  tr:hover td { background: rgba(255,255,255,0.02); }
+  td:first-child { color: var(--text); font-weight: 400; }
+  .tag {
+    display: inline-block;
+    font-family: var(--mono);
+    font-size: 11px;
+    padding: 2px 8px;
+    border-radius: 3px;
+  }
+  .tag.cyan { background: var(--cyan-dim); color: var(--cyan); }
+  .tag.amber { background: var(--amber-dim); color: var(--amber); }
+
+  /* Highlight boxes */
+  .callout {
+    display: flex;
+    gap: 14px;
+    padding: 1rem 1.25rem;
+    border-radius: 8px;
+    margin-bottom: 1.5rem;
+    align-items: flex-start;
+  }
+  .callout.cyan { background: var(--cyan-dim); border: 1px solid rgba(0,194,224,0.2); }
+  .callout.amber { background: var(--amber-dim); border: 1px solid rgba(240,165,0,0.2); }
+  .callout.red { background: var(--red-dim); border: 1px solid rgba(232,68,90,0.2); }
+  .callout.green { background: var(--green-dim); border: 1px solid rgba(52,217,123,0.2); }
+  .callout-icon { font-size: 14px; margin-top: 1px; flex-shrink: 0; }
+  .callout-text { font-size: 14px; line-height: 1.65; font-weight: 300; }
+  .callout.cyan .callout-text { color: rgba(0,194,224,0.9); }
+  .callout.amber .callout-text { color: rgba(240,165,0,0.9); }
+  .callout.red .callout-text { color: rgba(232,68,90,0.9); }
+  .callout.green .callout-text { color: rgba(52,217,123,0.85); }
+  .callout strong { font-weight: 500; }
+
+  /* Steps */
+  .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 1.5rem; }
+  @media (max-width: 580px) { .two-col { grid-template-columns: 1fr; } }
+  .step-card {
+    background: var(--bg3);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 1.25rem;
+  }
+  .step-card-label {
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    margin-bottom: 1rem;
+    padding-bottom: 0.75rem;
+    border-bottom: 1px solid var(--border);
+  }
+  .step-card-label.cyan { color: var(--cyan); }
+  .step-card-label.amber { color: var(--amber); }
+  .step { display: flex; gap: 12px; margin-bottom: 0.75rem; align-items: flex-start; }
+  .step-num {
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: var(--mono);
+    font-size: 11px;
+    font-weight: 500;
+    flex-shrink: 0;
+    margin-top: 2px;
+  }
+  .step-num.cyan { background: var(--cyan-dim); color: var(--cyan); border: 1px solid rgba(0,194,224,0.25); }
+  .step-num.amber { background: var(--amber-dim); color: var(--amber); border: 1px solid rgba(240,165,0,0.25); }
+  .step-text { font-size: 13.5px; color: var(--text2); line-height: 1.6; font-weight: 300; }
+
+  /* Code */
+  code {
+    font-family: var(--mono);
+    font-size: 12px;
+    background: var(--bg4);
+    color: var(--cyan);
+    padding: 2px 6px;
+    border-radius: 3px;
+    border: 1px solid var(--border);
+  }
+  pre {
+    font-family: var(--mono);
+    font-size: 12.5px;
+    background: var(--bg4);
+    color: #c9d1d9;
+    padding: 1rem 1.25rem;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    margin: 0.75rem 0;
+    line-height: 1.7;
+    overflow-x: auto;
+  }
+
+  /* JWT structure */
+  .jwt-bar {
+    font-family: var(--mono);
+    font-size: 13px;
+    display: flex;
+    gap: 2px;
+    margin-bottom: 1.5rem;
+    flex-wrap: wrap;
+  }
+  .jwt-part {
+    padding: 8px 16px;
+    border-radius: 6px;
+    font-weight: 500;
+  }
+  .jwt-header { background: rgba(240,165,0,0.15); color: var(--amber); border: 1px solid rgba(240,165,0,0.25); }
+  .jwt-payload { background: var(--cyan-dim); color: var(--cyan); border: 1px solid rgba(0,194,224,0.25); }
+  .jwt-sig { background: var(--purple-dim); color: var(--purple); border: 1px solid rgba(159,125,255,0.25); }
+  .jwt-dot { color: var(--text3); display: flex; align-items: center; padding: 0 2px; }
+
+  /* Attack cards */
+  .attack {
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    margin-bottom: 10px;
+    overflow: hidden;
+    transition: border-color 0.2s;
+  }
+  .attack:hover { border-color: var(--border2); }
+  .attack.open { border-color: rgba(232,68,90,0.3); }
+  .attack-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 1rem 1.25rem;
+    cursor: pointer;
+    background: var(--bg3);
+    user-select: none;
+    gap: 12px;
+  }
+  .attack-head:hover { background: var(--bg4); }
+  .attack-head-left { display: flex; align-items: center; gap: 12px; min-width: 0; }
+  .severity {
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    padding: 3px 8px;
+    border-radius: 3px;
+    flex-shrink: 0;
+    font-weight: 500;
+  }
+  .severity.crit { background: var(--red-dim); color: var(--red); border: 1px solid rgba(232,68,90,0.25); }
+  .severity.high { background: var(--amber-dim); color: var(--amber); border: 1px solid rgba(240,165,0,0.25); }
+  .attack-title {
+    font-family: var(--display);
+    font-size: 14.5px;
+    font-weight: 600;
+    color: var(--text);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .attack-arrow {
+    font-size: 11px;
+    color: var(--text3);
+    transition: transform 0.25s;
+    flex-shrink: 0;
+  }
+  .attack.open .attack-arrow { transform: rotate(180deg); color: var(--red); }
+  .attack-body {
+    display: none;
+    padding: 1.25rem;
+    background: var(--bg2);
+    border-top: 1px solid var(--border);
+  }
+  .attack-body.open { display: block; animation: fadeIn 0.2s ease; }
+  .attack-row { margin-bottom: 1rem; }
+  .attack-row-label {
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--text3);
+    margin-bottom: 0.35rem;
+  }
+  .attack-row-text {
+    font-size: 13.5px;
+    color: var(--text2);
+    line-height: 1.65;
+    font-weight: 300;
+  }
+
+  /* Misconceptions */
+  .mis {
+    background: var(--bg3);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 1.25rem;
+    margin-bottom: 10px;
+    transition: border-color 0.2s;
+  }
+  .mis:hover { border-color: var(--border2); }
+  .mis-title {
+    font-family: var(--display);
+    font-size: 15px;
+    font-weight: 700;
+    color: #fff;
+    margin-bottom: 1rem;
+    padding-bottom: 0.75rem;
+    border-bottom: 1px solid var(--border);
+  }
+  .vs-row { display: flex; gap: 10px; margin-bottom: 0.6rem; align-items: flex-start; }
+  .vs-label {
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 0.06em;
+    padding: 3px 8px;
+    border-radius: 3px;
+    flex-shrink: 0;
+    margin-top: 2px;
+    font-weight: 500;
+    text-transform: uppercase;
+  }
+  .vs-myth { background: var(--red-dim); color: var(--red); border: 1px solid rgba(232,68,90,0.25); }
+  .vs-real { background: var(--green-dim); color: var(--green); border: 1px solid rgba(52,217,123,0.25); }
+  .vs-text { font-size: 13.5px; color: var(--text2); line-height: 1.6; font-weight: 300; }
+  .example-list { margin-top: 0.85rem; padding-top: 0.85rem; border-top: 1px solid var(--border); }
+  .example-item {
+    font-size: 12.5px;
+    color: var(--text3);
+    line-height: 1.6;
+    padding: 0.5rem 0.75rem;
+    border-left: 2px solid var(--border2);
+    margin-bottom: 0.5rem;
+    font-style: italic;
+    font-weight: 300;
+  }
+  .example-item:last-child { margin-bottom: 0; }
+
+  /* Section divider */
+  .divider {
+    height: 1px;
+    background: var(--border);
+    margin: 2rem 0;
+  }
+
+  hr { border: none; border-top: 1px solid var(--border); margin: 1.5rem 0; }
+  strong { font-weight: 500; color: var(--text); }
+  em { color: var(--cyan); font-style: normal; font-family: var(--mono); font-size: 0.9em; }
+</style>
+</head>
+<body>
+<div class="page">
+
+  <div class="header">
+    <div class="header-eyebrow">Security reference</div>
+    <h1>Public &amp; <span>Private</span> Keys</h1>
+    <p class="header-sub">From asymmetric cryptography fundamentals to JWT attacks and common implementation mistakes.</p>
+  </div>
+
+  <div class="nav">
+    <button class="nav-btn active" onclick="show('fundamentals',this)">01 — Fundamentals</button>
+    <button class="nav-btn" onclick="show('howauth',this)">02 — How auth works</button>
+    <button class="nav-btn" onclick="show('jwt',this)">03 — JWT</button>
+    <button class="nav-btn" onclick="show('attacks',this)">04 — JWT attacks</button>
+    <button class="nav-btn" onclick="show('misconceptions',this)">05 — Misconceptions</button>
+  </div>
+
+  <!-- FUNDAMENTALS -->
+  <div id="fundamentals" class="section active">
+    <div class="section-label">Section 01</div>
+    <h2>Fundamentals</h2>
+    <p class="section-intro">Asymmetric cryptography uses a mathematically linked key pair. The two keys are generated together using algorithms like RSA or Elliptic Curve Cryptography — but you cannot reverse-derive one from the other.</p>
+
+    <div class="card-grid">
+      <div class="card">
+        <div class="card-icon cyan">PUB</div>
+        <h3>Public key</h3>
+        <p>Shared freely with anyone. Used to encrypt data for the owner, or to verify a signature the owner created.</p>
+      </div>
+      <div class="card">
+        <div class="card-icon amber">PRIV</div>
+        <h3>Private key</h3>
+        <p>Kept secret by the owner. Used to decrypt data encrypted with the public key, or to sign data.</p>
+      </div>
+      <div class="card">
+        <div class="card-icon purple">ALG</div>
+        <h3>One-way relationship</h3>
+        <p>Deriving a private key from its public key is computationally infeasible — the core security assumption of the entire system.</p>
+      </div>
+    </div>
+
+    <div class="divider"></div>
+
+    <h3 style="font-family:var(--display);font-size:1rem;font-weight:700;color:#fff;margin-bottom:1rem;">The two operations</h3>
+
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>Goal</th><th>Operation</th><th>Sender uses</th><th>Receiver uses</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Keep data secret</td>
+            <td><span class="tag cyan">Encryption</span></td>
+            <td>Recipient's <em>public</em> key</td>
+            <td>Own <em>private</em> key</td>
+          </tr>
+          <tr>
+            <td>Prove identity</td>
+            <td><span class="tag amber">Signature</span></td>
+            <td>Own <em>private</em> key</td>
+            <td>Sender's <em>public</em> key</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="callout cyan">
+      <span class="callout-icon">→</span>
+      <span class="callout-text"><strong>Memory hook:</strong> Sign with your <strong>private key</strong> so others can verify with your public key. Encrypt with the recipient's <strong>public key</strong> so only they can decrypt with their private key.</span>
+    </div>
+
+    <div class="divider"></div>
+
+    <h3 style="font-family:var(--display);font-size:1rem;font-weight:700;color:#fff;margin-bottom:1rem;">Where public keys are used</h3>
+    <div class="card-grid">
+      <div class="card">
+        <div class="card-icon cyan">TLS</div>
+        <h3>HTTPS / Web security</h3>
+        <p>Server presents a certificate with its public key. Browser verifies it against a Certificate Authority. Secure session established.</p>
+      </div>
+      <div class="card">
+        <div class="card-icon amber">SSH</div>
+        <h3>Remote access</h3>
+        <p>You store your public key on the server. Authentication uses your private key locally. No password required.</p>
+      </div>
+      <div class="card">
+        <div class="card-icon green">SIG</div>
+        <h3>Code signing</h3>
+        <p>OS verifies software updates using the developer's public key. Used by Windows Update, Apple iOS and macOS.</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- HOW AUTH WORKS -->
+  <div id="howauth" class="section">
+    <div class="section-label">Section 02</div>
+    <h2>How authentication works</h2>
+    <p class="section-intro">Authentication via digital signatures is a two-phase process. The sender signs; the receiver independently verifies. Neither party needs to share a secret.</p>
+
+    <div class="two-col">
+      <div class="step-card">
+        <div class="step-card-label amber">Phase 1 — Signing (sender)</div>
+        <div class="step"><div class="step-num amber">1</div><div class="step-text">Take message <code>M</code></div></div>
+        <div class="step"><div class="step-num amber">2</div><div class="step-text">Compute hash: <code>H = hash(M)</code></div></div>
+        <div class="step"><div class="step-num amber">3</div><div class="step-text">Sign hash with private key: <code>S = Sign(H, priv)</code></div></div>
+        <div class="step"><div class="step-num amber">4</div><div class="step-text">Transmit <code>(M, S)</code> to receiver</div></div>
+      </div>
+      <div class="step-card">
+        <div class="step-card-label cyan">Phase 2 — Verification (receiver)</div>
+        <div class="step"><div class="step-num cyan">1</div><div class="step-text">Receive <code>(M, S)</code></div></div>
+        <div class="step"><div class="step-num cyan">2</div><div class="step-text">Hash the message: <code>H1 = hash(M)</code></div></div>
+        <div class="step"><div class="step-num cyan">3</div><div class="step-text">Recover from signature: <code>H2 = Verify(S, pub)</code></div></div>
+        <div class="step"><div class="step-num cyan">4</div><div class="step-text">If <code>H1 == H2</code> → authentic and unmodified</div></div>
+      </div>
+    </div>
+
+    <div class="callout cyan">
+      <span class="callout-icon">→</span>
+      <span class="callout-text">The receiver independently hashes the message and compares it to what was recovered from the signature. A match means the message came from the real sender and was not tampered with in transit.</span>
+    </div>
+
+    <div class="callout amber">
+      <span class="callout-icon">!</span>
+      <span class="callout-text"><strong>Key insight:</strong> No shared secret is ever transmitted. The public key used for verification can be known by everyone — that's the point.</span>
+    </div>
+  </div>
+
+  <!-- JWT -->
+  <div id="jwt" class="section">
+    <div class="section-label">Section 03</div>
+    <h2>JSON Web Tokens</h2>
+    <p class="section-intro">A JWT is a self-contained, tamper-evident token. Three base64url-encoded parts separated by dots.</p>
+
+    <div class="jwt-bar">
+      <div class="jwt-part jwt-header">header</div>
+      <div class="jwt-dot">.</div>
+      <div class="jwt-part jwt-payload">payload</div>
+      <div class="jwt-dot">.</div>
+      <div class="jwt-part jwt-sig">signature</div>
+    </div>
+
+    <div class="card-grid">
+      <div class="card">
+        <div class="card-icon amber">{ }</div>
+        <h3>Header</h3>
+        <p>Declares the signing algorithm — e.g. <code>HS256</code>, <code>RS256</code>. <strong>Attacker-controlled input.</strong> Never trust it blindly.</p>
+      </div>
+      <div class="card">
+        <div class="card-icon cyan">{ }</div>
+        <h3>Payload</h3>
+        <p>Contains claims: user ID, role, expiry, etc. <strong>Not encrypted</strong> — only base64 encoded. Anyone can decode it instantly.</p>
+      </div>
+      <div class="card">
+        <div class="card-icon purple">sig</div>
+        <h3>Signature</h3>
+        <p>Proves that header + payload were not modified since signing. Does <em>not</em> prove the claims inside are correct or authorised.</p>
+      </div>
+    </div>
+
+    <div class="callout red">
+      <span class="callout-icon">!</span>
+      <span class="callout-text"><strong>Critical:</strong> JWTs are not encrypted by default. The payload is trivially decodable by anyone. Never store passwords, API keys, or sensitive PII in a JWT payload.</span>
+    </div>
+
+    <div class="divider"></div>
+
+    <h3 style="font-family:var(--display);font-size:1rem;font-weight:700;color:#fff;margin-bottom:1rem;">Symmetric vs asymmetric signing</h3>
+
+    <div class="two-col">
+      <div class="step-card">
+        <div class="step-card-label amber">Case 1 — Symmetric (HS256)</div>
+        <p style="font-size:13.5px;color:var(--text2);margin-bottom:0.75rem;font-weight:300;">Both parties use the <strong>same secret</strong> to sign and verify. The secret must be shared between all verifiers.</p>
+        <pre>signature = HMAC(secret, header + payload)</pre>
+        <p style="font-size:12px;color:var(--text3);margin-top:0.5rem;font-weight:300;">Simpler setup, but the secret must stay secret on every verifying server.</p>
+      </div>
+      <div class="step-card">
+        <div class="step-card-label cyan">Case 2 — Asymmetric (RS256)</div>
+        <p style="font-size:13.5px;color:var(--text2);margin-bottom:0.75rem;font-weight:300;">Server signs with <strong>private key</strong>. Anyone verifies with the <strong>public key</strong>. Public key can be freely distributed.</p>
+        <pre>sign   → private key (server only)
+verify → public key (anyone)</pre>
+        <p style="font-size:12px;color:var(--text3);margin-top:0.5rem;font-weight:300;">Preferred for distributed systems. No secret needs to be shared with verifiers.</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- ATTACKS -->
+  <div id="attacks" class="section">
+    <div class="section-label">Section 04</div>
+    <h2>JWT attacks</h2>
+    <p class="section-intro">Each attack exploits a specific implementation mistake. Click any attack to expand the full breakdown.</p>
+    <div id="attack-list"></div>
+  </div>
+
+  <!-- MISCONCEPTIONS -->
+  <div id="misconceptions" class="section">
+    <div class="section-label">Section 05</div>
+    <h2>Common misconceptions</h2>
+    <p class="section-intro">These are the most dangerous developer misunderstandings — because they feel correct on the surface.</p>
+    <div id="mis-list"></div>
+  </div>
+
+</div>
+
+<script>
+const attacks = [
+  {
+    name: '"alg=none" — signature stripped',
+    sev: 'crit',
+    sevLabel: 'Critical',
+    how: 'Attacker modifies the JWT header to set <code>alg: "none"</code> and removes the signature entirely.',
+    vuln: 'Server trusts the header blindly and skips signature verification when <code>alg</code> is <code>none</code>.',
+    impact: 'Attacker forges arbitrary claims — e.g. <code>{"user": "admin"}</code> — with zero cryptographic material.',
+    fix: 'Hardcode the expected algorithm server-side. Reject any token where <code>alg</code> does not match your expectation.'
+  },
+  {
+    name: 'HMAC ↔ RSA algorithm confusion',
+    sev: 'crit',
+    sevLabel: 'Critical',
+    how: 'Server expects <code>RS256</code> but also accepts <code>HS256</code>. Attacker changes header to <code>{"alg": "HS256"}</code> and signs with the server\'s <em>public</em> key as the HMAC secret.',
+    vuln: 'The server\'s public key is often publicly available. Server verifies HMAC using the public key — which matches, because the attacker used it to sign.',
+    impact: 'Attacker creates cryptographically valid tokens with any payload they choose.',
+    fix: 'Enforce a single, server-configured algorithm. Never allow the token itself to dictate how it is verified.'
+  },
+  {
+    name: 'Signature not verified properly',
+    sev: 'crit',
+    sevLabel: 'Critical',
+    how: 'Server ignores the boolean return value of the verify call, uses the wrong key, or accepts tokens past their expiry.',
+    vuln: 'Attacker modifies payload (<code>role: "admin"</code>) and resubmits with a tampered or original signature. Server accepts it regardless.',
+    impact: 'Complete token forgery. Attacker can claim any identity or role.',
+    fix: 'Always check the return value of verification. Validate all claims (<code>exp</code>, <code>iss</code>, <code>aud</code>) after the signature passes.'
+  },
+  {
+    name: 'Weak or hardcoded HMAC secret',
+    sev: 'high',
+    sevLabel: 'High',
+    how: 'Application uses a trivial secret: <code>secret</code>, <code>password</code>, <code>123456</code>, or the literal jwt.io example string <code>your-256-bit-secret</code>.',
+    vuln: 'Attacker brute-forces the HMAC secret offline using tools like hashcat or jwt_tool.',
+    code: 'hashcat -a 0 -m 16500 token.jwt wordlist.txt',
+    impact: 'Attacker recovers the secret and signs arbitrary tokens that the server will fully trust.',
+    fix: 'Use a cryptographically random secret of at least 256 bits. Rotate it periodically. Never ship placeholder secrets.'
+  },
+  {
+    name: 'Key injection via "kid" header',
+    sev: 'crit',
+    sevLabel: 'Critical',
+    how: 'The <code>kid</code> header tells the server which key to use for verification. If unsanitised, it becomes injectable.',
+    vuln: 'SQL injection: <code>{"kid": "\' UNION SELECT \'attacker_secret\'--"}</code><br>Path traversal: <code>{"kid": "../../dev/null"}</code> — signs with empty string as key.<br>SSRF: server fetches key from an attacker-controlled URL.',
+    impact: 'Attacker fully controls which key is used, enabling arbitrary token forgery.',
+    fix: 'Sanitise and whitelist all <code>kid</code> values. Never pass them directly to database queries or file-system paths.'
+  },
+  {
+    name: 'No token revocation',
+    sev: 'high',
+    sevLabel: 'High',
+    how: 'JWTs are stateless — the server has no memory of issued tokens. A "logout" only deletes the token client-side.',
+    vuln: 'A stolen token remains valid on the server after the victim logs out, resets their password, or has their account deactivated — until the <code>exp</code> timestamp passes.',
+    impact: 'Attacker continues using a stolen token indefinitely. Very common in SPAs and mobile backends.',
+    fix: 'Maintain a server-side denylist keyed on the <code>jti</code> (token ID) claim. Check it on every request.'
+  },
+  {
+    name: 'jku / x5u header injection',
+    sev: 'crit',
+    sevLabel: 'Critical',
+    how: 'The <code>jku</code> header specifies a URL from which the server fetches the public key (JWK Set). Attacker sets <code>{"jku": "https://attacker.com/evil-jwks.json"}</code>.',
+    vuln: 'Server fetches attacker\'s JWKS endpoint and uses the attacker\'s public key to verify. Attacker signs tokens with their matching private key.',
+    impact: 'Attacker-signed tokens are fully trusted by the server.',
+    fix: 'Never fetch verification keys from URLs provided inside the token. Hardcode or strictly whitelist the allowed JWKS endpoint.'
+  },
+  {
+    name: 'jwk header embedding',
+    sev: 'crit',
+    sevLabel: 'Critical',
+    how: 'Attacker embeds their own RSA public key directly in the JWT header under the <code>jwk</code> field, then signs the token with their matching private key.',
+    vuln: 'Server uses the embedded key to verify the signature — which succeeds, because the attacker created the pair.',
+    impact: 'Attacker forges any claims. A CVE-class issue found repeatedly in enterprise SSO products in 2023–2024.',
+    fix: 'Ignore or reject the <code>jwk</code> header entirely. Only use pre-configured, trusted keys stored server-side.'
+  }
+];
+
+const misconceptions = [
+  {
+    myth: 'JWT payload is private',
+    wrong: '"JWT is encrypted, so data inside is safe."',
+    right: 'JWT (JWS) is base64url-encoded, not encrypted. Anyone with the token can decode the payload instantly. Sensitive fields in the payload are a data leak.',
+    examples: []
+  },
+  {
+    myth: 'Valid signature means the claims are correct',
+    wrong: '"Valid signature = safe to trust everything inside."',
+    right: 'A signature proves integrity — that the token was not modified after signing. It does not prove that the claims inside were correct when the server signed it.',
+    examples: [
+      'User registers with <code>{"role": "admin"}</code> in the request body. Server blindly signs it. Attacker has a valid admin token.',
+      'Attacker adds <code>"is_premium": true</code> to a profile update. A lazy server serialises all request fields into the new JWT.'
+    ]
+  },
+  {
+    myth: 'The alg header field is trustworthy',
+    wrong: '"The JWT header tells us how to verify it."',
+    right: 'The header is attacker-controlled input. Accepting arbitrary algorithm values directly enables the alg=none attack and the HMAC/RSA confusion attack.',
+    examples: []
+  },
+  {
+    myth: 'Crypto libraries handle everything safely',
+    wrong: '"The library handles all verification correctly."',
+    right: 'Many real-world systems skip checking the return value of verify(), use weak defaults, or accept invalid signatures due to misconfiguration. The library is only as safe as how you call it.',
+    examples: [
+      'Developer ignores a false return from verify(). Attacker submits <code>role=admin</code> with a stripped signature — the check runs but the result is discarded.'
+    ]
+  },
+  {
+    myth: 'A signed token means the user is authorised',
+    wrong: '"If the token is signed by us, the user can access the resource."',
+    right: 'A signed token only proves who issued it — not whether this user has the right to access this specific resource. Authentication and authorisation are separate steps.',
+    examples: [
+      'User A has a valid token. They request <code>GET /messages?user=B</code>. Server checks the signature (passes) but never checks if User A is allowed to read User B\'s messages — a textbook IDOR.'
+    ]
+  },
+  {
+    myth: 'A token scoped to one service works everywhere',
+    wrong: '"It\'s signed by our server, so it\'s good."',
+    right: 'Tokens should carry an <code>aud</code> (audience) claim that is validated by every service. A token for Service A must not be accepted by Service B.',
+    examples: [
+      'App token issued for ebook downloads is replayed against an Admin Console that only checks <code>isValidSignature()</code> — full admin access granted.'
+    ]
+  }
+];
+
+const alist = document.getElementById('attack-list');
+attacks.forEach((a, i) => {
+  const el = document.createElement('div');
+  el.className = 'attack';
+  el.id = 'atk-' + i;
+  el.innerHTML = `
+    <div class="attack-head" onclick="toggleAtk(${i})">
+      <div class="attack-head-left">
+        <span class="severity ${a.sev}">${a.sevLabel}</span>
+        <span class="attack-title">${a.name}</span>
+      </div>
+      <span class="attack-arrow" id="atkarr-${i}">▾</span>
+    </div>
+    <div class="attack-body" id="atkbody-${i}">
+      <div class="attack-row">
+        <div class="attack-row-label">How it works</div>
+        <div class="attack-row-text">${a.how}</div>
+      </div>
+      <div class="attack-row">
+        <div class="attack-row-label">Vulnerable condition</div>
+        <div class="attack-row-text">${a.vuln}</div>
+      </div>
+      ${a.code ? `<pre>${a.code}</pre>` : ''}
+      <div class="attack-row">
+        <div class="attack-row-label">Impact</div>
+        <div class="callout red" style="margin:0;"><span class="callout-icon">!</span><span class="callout-text">${a.impact}</span></div>
+      </div>
+      <div class="attack-row" style="margin-bottom:0;">
+        <div class="attack-row-label" style="margin-top:0.75rem;">Fix</div>
+        <div class="callout green" style="margin:0;"><span class="callout-icon">✓</span><span class="callout-text">${a.fix}</span></div>
+      </div>
+    </div>`;
+  alist.appendChild(el);
+});
+
+function toggleAtk(i) {
+  const body = document.getElementById('atkbody-' + i);
+  const arr = document.getElementById('atkarr-' + i);
+  const card = document.getElementById('atk-' + i);
+  const open = body.classList.toggle('open');
+  arr.classList.toggle('open', open);
+  card.classList.toggle('open', open);
+}
+
+const mlist = document.getElementById('mis-list');
+misconceptions.forEach(m => {
+  const el = document.createElement('div');
+  el.className = 'mis';
+  el.innerHTML = `
+    <div class="mis-title">${m.myth}</div>
+    <div class="vs-row"><span class="vs-label vs-myth">Myth</span><span class="vs-text">${m.wrong}</span></div>
+    <div class="vs-row"><span class="vs-label vs-real">Reality</span><span class="vs-text">${m.right}</span></div>
+    ${m.examples.length ? `<div class="example-list">${m.examples.map(e => `<div class="example-item">${e}</div>`).join('')}</div>` : ''}
+  `;
+  mlist.appendChild(el);
+});
+
+function show(id, btn) {
+  document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
+  document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
+  document.getElementById(id).classList.add('active');
+  btn.classList.add('active');
+}
+</script>
+</body>
+</html>
