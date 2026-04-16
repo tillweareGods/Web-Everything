@@ -1,0 +1,13 @@
+# ghrecon requirements
+# Core: all stdlib except below
+# Optional: aiodns for faster DNS (used by sudomy, not this tool)
+
+# Required
+PyYAML>=6.0
+
+# Optional but recommended (fall back to stdlib if missing)
+# requests>=2.31         # fallback: urllib (already used)
+# rich>=13.0             # fallback: plain ANSI colours (already used)
+
+# Development
+pytest>=7.0
